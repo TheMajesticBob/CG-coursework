@@ -44,7 +44,7 @@ void main()
 	{
 		colour = vec4( image.r );
 	} else {
-		colour = texCoord; // ((ambient + diffuse) * tex_colour) + specular;
+		colour = image; // ((ambient + diffuse) * tex_colour) + specular;
 	}
 	
     const float gamma = 2.2;

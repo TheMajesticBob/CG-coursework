@@ -12,8 +12,62 @@ uniform sampler2D tDiffuse;
 uniform sampler2D tPosition;
 uniform sampler2D tNormals;
 
+uniform point_light gPointLight;
+uniform vec3 gEyeWorldPos;
+uniform vec2 gScreenSize;
+
 // Incoming texture coordinate
 layout(location = 0) in vec2 tex_coord;
+
+layout(location = 0) out vec4 colour;
+
+vec2 CalcTexCoord()
+{
+   return gl_FragCoord.xy / gScreenSize;
+}
+
+vec4 CalcLightInternal(point_light Light,
+					   vec3 LightDirection,
+					   vec3 WorldPos,
+					   vec3 Normal)
+{
+    vec4 AmbientColor = Light.light_colour;
+    float DiffuseFactor = dot(Normal, -LightDirection);
+
+    vec4 DiffuseColor  = vec4(0, 0, 0, 0);
+    vec4 SpecularColor = vec4(0, 0, 0, 0);
+
+    if (DiffuseFactor > 0.0) {
+        DiffuseColor = Light.light_colour * DiffuseFactor;
+
+        vec3 VertexToEye = normalize(gEyeWorldPos - WorldPos);
+        vec3 LightReflect = normalize(reflect(LightDirection, Normal));
+        float SpecularFactor = dot(VertexToEye, LightReflect);        
+        if (SpecularFactor > 0.0) {
+            SpecularFactor = pow(SpecularFactor, 2.0);
+            SpecularColor = Light.light_colour * SpecularFactor;
+        }
+    }
+
+    return (AmbientColor + DiffuseColor + SpecularColor);
+}
+
+vec4 CalcPointLight(vec3 WorldPos, vec3 Normal)
+{
+    vec3 LightDirection = WorldPos - gPointLight.position;
+    float Distance = length(LightDirection);
+    LightDirection = normalize(LightDirection);
+
+    vec4 Color = CalcLightInternal(gPointLight, LightDirection, WorldPos, Normal);
+
+    float Attenuation =  gPointLight.constant +
+                         gPointLight.linear * Distance +
+                         gPointLight.quadratic * Distance * Distance;
+
+    Attenuation = max(1.0, Attenuation);
+
+    return Color / Attenuation;
+}
 
 void main()
 {
@@ -23,35 +77,5 @@ void main()
    	vec3 Normal = texture(tNormals, TexCoord).xyz;
    	Normal = normalize(Normal);
 
-   	FragColor = vec4(Color, 1.0) * calculate_point(WorldPos, Normal);
-}
-
-vec2 CalcTexCoord()
-{
-   return gl_FragCoord.xy / gScreenSize;
-}
-
-vec4 calculate_point(in point_light point, in material mat, in vec3 position, in vec3 normal, in vec3 view_dir, in vec4 tex_colour)
-{
-	// *********************************
-	// Get distance between point light and vertex
-	float dist = distance(position, point.position);
-	// Calculate attenuation factor
-	float attentuation = 1 / (point.constant + point.linear * dist + point.quadratic * dist * dist );
-	// Calculate light colour
-	vec4 light_colour = point.light_colour * attentuation;
-	//Set colour alpha to 1.0
-	light_colour.a = 1.0;
-	// Calculate light dir
-	vec3 light_dir = normalize( point.position - position );
-	// *********************************
-	// Now use standard phong shading but using calculated light colour and direction
-	// - note no ambient
-	vec4 diffuse = (mat.diffuse_reflection * light_colour) * max(dot(normal, light_dir), 0);
-	vec3 half_vector = normalize(light_dir + view_dir);
-	vec4 specular = (mat.specular_reflection * light_colour) * pow(max(dot(normal, half_vector), 0), mat.shininess);
-	vec4 primary = mat.emissive + diffuse;
-	vec4 colour = primary * tex_colour + specular;
-	colour.a = 1.0;
-	return colour;
+   	colour = vec4(Color, 1.0) * CalcPointLight(WorldPos, Normal);
 }
