@@ -12,10 +12,9 @@ Player::Player()
 	turretRotationSpeed = 5.0f;
 }
 
-Player::Player(mesh m, effect* e = nullptr, texture* t = nullptr, texture* n = nullptr) : Player()
+Player::Player(mesh m, texture* t = nullptr, texture* n = nullptr) : Player()
 {
 	my_mesh = m;
-	my_eff = e;
 	my_tex = t;
 	my_normal = n;
 

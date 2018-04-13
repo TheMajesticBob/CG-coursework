@@ -55,6 +55,6 @@ void main( void )
 
 	tex_coord_out = tex_coord_in;
 
-	diffuse_out = mat.diffuse_reflection;
+	diffuse_out = vec4(mat.diffuse_reflection.rgb, mat.shininess);
 	specular_out = mat.specular_reflection;
 }

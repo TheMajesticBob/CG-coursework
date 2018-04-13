@@ -1,15 +1,11 @@
 #version 430 core
 
 // Incoming texture containing frame information
-uniform sampler2D tPosition;
-uniform sampler2D tDiffuse; 
+uniform sampler2D tAlbedo;
 uniform sampler2D tNormals;
-uniform sampler2D tTexCoord;
-
 uniform sampler2D depth;
 
 uniform vec4 outline_colour;
-
 uniform vec2 screen_size;
 
 uniform float blend_value;
@@ -27,10 +23,17 @@ layout(location = 0) in vec2 tex_coord;
 // Outgoing colour
 layout(location = 0) out vec4 colour;
 
+vec2 CalcTexCoord()
+{
+   return gl_FragCoord.xy / screen_size;
+}
+
 void main() {
 	// Calculate texel size and coordinate offset for edge detection
 	vec2 texelSize = 1.0 / screen_size;
-	vec2 blockSize = clamp( ceil( screen_size / 256.0 ), 1.0, 2.0 ) * texelSize;
+	vec2 blockSize = clamp( ceil( screen_size / 256.0 ), 0.0, 2.0 ) * texelSize;
+
+	vec2 coord = CalcTexCoord();
 
 	// Get neighbour coordinates
 	vec2[4] uvs = vec2[]( 
@@ -40,7 +43,8 @@ void main() {
 					vec2( 0.0, -blockSize.g ) + tex_coord);
 
 	// Sample main depth texture
-	vec4 mainDepth = texture(depth, tex_coord);
+	vec4 mainDepth = texture(depth, tex_coord) / 4.0;
+	vec4 mainNormal = texture(tNormals, tex_coord);
 
 	// Sample depth texture with offset UVs and subtract them from main depth
 	vec4[4] depths = vec4[](
@@ -49,26 +53,35 @@ void main() {
 					mainDepth - texture(depth, uvs[2]),
 					mainDepth - texture(depth, uvs[3]));
 
+	vec4[4] normals = vec4[](
+					mainNormal - texture(tNormals, uvs[0]),
+					mainNormal - texture(tNormals, uvs[1]),
+					mainNormal - texture(tNormals, uvs[2]),
+					mainNormal - texture(tNormals, uvs[3]));
+	
 	// Add everything together
 
-	vec4 edgeDepth = clamp( (depths[0] + depths[1] + depths[2] + depths[3]) / flattening_value, 0.0, 1.0 ) * blend_value;
+	vec4 depthSum = vec4(0.0);
+	vec4 normalSum = vec4(0.0);
 
-	// Calculate falloff (to not render outlines for objects too close or far from the camera)
-	float near = clamp( 1.0 - (mainDepth.r / near_distance ), 0.25, 1.0 );
-	float far = clamp( 1.0 - (mainDepth.r / far_distance ), 0.0, 1.0 );
+	for( int i = 0; i < 4; ++i )
+	{
+		depthSum += depths[i];
+		normalSum += normals[i];
+	}
 
-	float falloffValue = mix( near, far, blend_value );
+	vec4 edgeDepth = clamp( max(depthSum*2.0,normalSum) / flattening_value, 0.0, 1.0 ) * blend_value;
 
-	float outlineValue = clamp( edgeDepth.r * falloffValue, 0.0, 1.0 );
+	float outlineValue = clamp( pow(length(edgeDepth), 2.0), 0.0, 1.0 );
 
 	if( depth_only == 1 )
 	{
 		colour = vec4( vec3( outlineValue ), 1.0 );
 	} else if( depth_only == 2 )
 	{
-		colour = vec4( vec3( falloffValue ), 1.0 );
+		colour = edgeDepth;
 	} else {
-		colour = mix( texture( tDiffuse, tex_coord ), outline_colour, outlineValue );
+		colour = mix( texture( tAlbedo, tex_coord ), outline_colour, outlineValue );
 		colour.a = 1.0;
 	}
 }

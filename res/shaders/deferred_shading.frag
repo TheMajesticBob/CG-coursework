@@ -21,7 +21,7 @@ layout(location = 6) in vec4 specular;
 // They all were vec4!!
 layout(location = 0) out vec4 position_out;
 layout(location = 1) out vec4 diffuse_out;
-layout(location = 2) out vec4 normal_out;
+layout(location = 2) out vec3 normal_out;
 layout(location = 3) out vec4 mat_diffuse_out;
 layout(location = 4) out vec4 mat_specular_out;
 
@@ -31,7 +31,7 @@ void main()
 {
 	diffuse_out	 = texture2D(tex_diffuse,tex_coord);
 	position_out = position;
-	normal_out	 = vec4(calc_normal(normal, tangent, binormal, normal_map, tex_coord), 1.0);
+	normal_out	 = calc_normal(normal, tangent, binormal, normal_map, tex_coord);
 	mat_diffuse_out	 = diffuse;
 	mat_specular_out = specular;
 }

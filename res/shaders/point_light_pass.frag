@@ -11,6 +11,8 @@ struct point_light
 uniform sampler2D tPosition;
 uniform sampler2D tAlbedo; 
 uniform sampler2D tNormals;
+uniform sampler2D tMatDiffuse;
+uniform sampler2D tMatSpecular;
 
 uniform point_light gPointLight;
 uniform vec3 gEyeWorldPos;
@@ -20,49 +22,6 @@ uniform vec2 gScreenSize;
 layout(location = 0) in vec2 tex_coord;
 
 layout(location = 0) out vec4 colour;
-
-vec4 CalcLightInternal(point_light Light,
-					   vec3 LightDirection,
-					   vec3 WorldPos,
-					   vec3 Normal)
-{
-    vec4 AmbientColor = Light.light_colour;
-    float DiffuseFactor = dot(Normal, -LightDirection);
-
-    vec4 DiffuseColor  = vec4(0, 0, 0, 0);
-    vec4 SpecularColor = vec4(0, 0, 0, 0);
-
-    if (DiffuseFactor > 0.0) {
-        DiffuseColor = Light.light_colour * DiffuseFactor;
-
-        vec3 VertexToEye = normalize(gEyeWorldPos - WorldPos);
-        vec3 LightReflect = normalize(reflect(LightDirection, Normal));
-        float SpecularFactor = dot(VertexToEye, LightReflect);        
-        if (SpecularFactor > 0.0) {
-            SpecularFactor = pow(SpecularFactor, 2.0);
-            SpecularColor = Light.light_colour * SpecularFactor;
-        }
-    }
-
-    return (AmbientColor + DiffuseColor + SpecularColor);
-}
-
-vec4 CalcPointLight(vec3 WorldPos, vec3 Normal)
-{
-    vec3 LightDirection = WorldPos - gPointLight.position;
-    float Distance = length(LightDirection);
-    LightDirection = normalize(LightDirection);
-
-    vec4 Color = CalcLightInternal(gPointLight, LightDirection, WorldPos, Normal);
-
-    float Attenuation =  gPointLight.constant +
-                         gPointLight.linear * Distance +
-                         gPointLight.quadratic * Distance * Distance;
-
-    Attenuation = max(1.0, Attenuation);
-
-    return Color / Attenuation;
-}
 
 vec2 CalcTexCoord()
 {
@@ -75,7 +34,28 @@ void main()
    	vec3 WorldPos = texture(tPosition, TexCoord).xyz;
    	vec4 Color = texture(tAlbedo, TexCoord);
    	vec3 Normal = texture(tNormals, TexCoord).xyz;
+	vec4 Diffuse = texture(tMatDiffuse, TexCoord);
+	vec4 Specular = texture(tMatSpecular, TexCoord);
 	Normal = normalize(Normal);
+	
+	// Calculate view direction
+	vec3 view_dir = normalize( gEyeWorldPos - WorldPos );
+	// Get distance between point light and vertex
+	float dist = distance(WorldPos, gPointLight.position);
+	// Calculate attenuation factor
+	float attentuation = 1 / (gPointLight.constant + gPointLight.linear * dist + gPointLight.quadratic * dist * dist );
+	// Calculate light colour
+	vec4 light_colour = gPointLight.light_colour * attentuation;
+	//Set colour alpha to 1.0
+	light_colour.a = 1.0;
+	// Calculate light dir
+	vec3 light_dir = normalize( gPointLight.position - WorldPos );
 
-   	colour = Color * CalcPointLight(WorldPos, Normal);
+	// Now use standard phong shading but using calculated light colour and direction
+	// - note no ambient
+	vec4 diffuse = (vec4(Diffuse.rgb,1.0) * light_colour) * max(dot(Normal, light_dir), 0);
+	vec3 half_vector = normalize(light_dir + view_dir);
+	vec4 specular = (Specular * light_colour) * pow(max(dot(Normal, half_vector), 0), Diffuse.a);
+	colour = diffuse * Color + specular;
+	colour.a = 1.0;
 }

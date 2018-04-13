@@ -48,6 +48,8 @@ geometry screen_quad;
 
 // Input vars
 double mouse_x = 0.0, mouse_y = 0.0;
+float flatValue = 150.0f;
+float blendValue = 100.0f;
 
 void SetupLights();
 void SetupGeometry();
@@ -123,16 +125,6 @@ bool load_content() {
 	// Create lights
 	SetupLights();
 
-	// Load in shaders
-	specular.add_shader("res/shaders/shader.vert", GL_VERTEX_SHADER);
-	// Name of fragment shaders required
-	vector<string> frag_shaders{ "res/shaders/shader.frag", "res/shaders/part_direction.frag",
-		  "res/shaders/part_point.frag", "res/shaders/part_spot.frag", "res/shaders/part_shadow.frag" };
-	specular.add_shader(frag_shaders, GL_FRAGMENT_SHADER);
-	specular.add_shader("res/shaders/part_normal_map.frag", GL_FRAGMENT_SHADER);
-	// Build effect
-	specular.build();
-
 	deferredShading.add_shader("res/shaders/deferred_shading.vert", GL_VERTEX_SHADER);
 	deferredShading.add_shader("res/shaders/deferred_shading.frag", GL_FRAGMENT_SHADER);
 	deferredShading.add_shader("res/shaders/part_normal_map.frag", GL_FRAGMENT_SHADER);
@@ -196,6 +188,23 @@ bool update(float delta_time) {
 		currentCam->update(delta_time);
 	}
 
+	if (glfwGetKey(renderer::get_window(), 'Z')) {
+		flatValue -= 1.0f;
+		printf("%f\n\r", flatValue);
+	}
+	if (glfwGetKey(renderer::get_window(), 'X')) {
+		flatValue += 1.0f;
+		printf("%f\n\r", flatValue);
+	}
+
+	if (glfwGetKey(renderer::get_window(), 'C')) {
+		blendValue -= 0.5f;
+		printf("%f\n\r", blendValue);
+	}
+	if (glfwGetKey(renderer::get_window(), 'V')) {
+		blendValue += 0.5f;
+		printf("%f\n\r", blendValue);
+	}
 
 	if (glfwGetKey(renderer::get_window(), 'Q')) {
 		depthOnly = 1;
@@ -240,9 +249,9 @@ bool render() {
 	
 	DSDirectionalLightPass();
 	
-	RenderFrameOnScreen();
+	// RenderFrameOnScreen();
 
-	// RenderOutline();
+	RenderOutline();
 
   return true;
 }
@@ -265,6 +274,7 @@ void DSGeometryPass()
 
 	glDepthMask(GL_TRUE);
 	// Clear the render targets
+	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	
 	glEnable(GL_DEPTH_TEST);
@@ -404,6 +414,8 @@ void DSPointLightPass(int lightIndex)
 	glUniform1i(pointLightPass.get_uniform_location("tPosition"), 0);
 	glUniform1i(pointLightPass.get_uniform_location("tAlbedo"), 1);
 	glUniform1i(pointLightPass.get_uniform_location("tNormals"), 2);
+	glUniform1i(pointLightPass.get_uniform_location("tMatDiffuse"), 3);
+	glUniform1i(pointLightPass.get_uniform_location("tMatSpecular"), 4);
 
 	glUniformMatrix4fv(pointLightPass.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(MVP));
 	renderer::render(pLight);
@@ -431,6 +443,8 @@ void DSDirectionalLightPass()
 	glUniform1i(dirLightPass.get_uniform_location("tPosition"), 0);
 	glUniform1i(dirLightPass.get_uniform_location("tAlbedo"), 1);
 	glUniform1i(dirLightPass.get_uniform_location("tNormals"), 2);
+	glUniform1i(dirLightPass.get_uniform_location("tMatDiffuse"), 3);
+	glUniform1i(dirLightPass.get_uniform_location("tMatSpecular"), 4);
 
 	glUniformMatrix4fv(dirLightPass.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(mat4(1.0f)));
 	renderer::render(screen_quad);
@@ -442,52 +456,50 @@ void RenderFrameOnScreen()
 {
 	gBuffer.BindForFinalPass();
 
-	// renderer::set_render_target(frame);
-	glBlitFramebuffer(0, 0, screenSize.x, screenSize.y, 0, 0, screenSize.x, screenSize.y, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+	// glBlitFramebuffer(0, 0, screenSize.x, screenSize.y, 0, 0, screenSize.x, screenSize.y, GL_COLOR_BUFFER_BIT, GL_LINEAR);
 
-	/*
-
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	renderer::bind(deferredRendering);
 
-	glUniform1i(deferredRendering.get_uniform_location("tPosition"), 0);
-	glUniform1i(deferredRendering.get_uniform_location("tAlbedo"), 4);
-	glUniform1i(deferredRendering.get_uniform_location("tNormals"), 2);
-	glUniform1i(deferredRendering.get_uniform_location("tMatDiffuse"), 3);
+	glUniform1i(deferredRendering.get_uniform_location("tAlbedo"), 1);
 
 	glUniform1i(deferredRendering.get_uniform_location("depthOnly"), depthOnly);
+	glUniform1i(deferredRendering.get_uniform_location("exposure"), flatValue);
 	glUniformMatrix4fv(deferredRendering.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(mat4(1.0f)));
 
 	renderer::render(screen_quad);
-
-	*/
+	
 }
 
 void RenderOutline()
 {
-	renderer::set_render_target();
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	renderer::bind(outline);
 
 	// MVP is now the identity matrix
 	glUniformMatrix4fv(outline.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(mat4(1.0)));
-	// Bind texture from frame buffer
-	renderer::bind(frame.get_frame(), 0);
 
-	glUniform1i(outline.get_uniform_location("tPosition"), 0);
-	glUniform1i(outline.get_uniform_location("tAlbedo"), 1);
+	// Bind depth texture
+	glActiveTexture(GL_TEXTURE0);
+	glEnable(GL_TEXTURE_2D);
+	glBindTexture(GL_TEXTURE_2D, gBuffer.GetFinalTexture());
+
+	glUniform1i(outline.get_uniform_location("tAlbedo"), 0);
 	glUniform1i(outline.get_uniform_location("tNormals"), 2);
+
 	// Bind depth texture
 	glActiveTexture(GL_TEXTURE3);
 	glEnable(GL_TEXTURE_2D);
-	glBindTexture(GL_TEXTURE_2D, gDepthTexture);
+	glBindTexture(GL_TEXTURE_2D, gBuffer.GetDepthTexture());
 	// Set the tex uniform
 	glUniform1i(outline.get_uniform_location("depth"), 1);
 	// Set the screen_size uniform
 	glUniform2fv(outline.get_uniform_location("screen_size"), 1, value_ptr(vec2(renderer::get_screen_width(), renderer::get_screen_height())));
 	// Set the T uniform
-	glUniform1f(outline.get_uniform_location("blend_value"), 50.0f);
-	glUniform1f(outline.get_uniform_location("flattening_value"), -10.0f);
-	glUniform1f(outline.get_uniform_location("near_distance"), 6000.0f);
-	glUniform1f(outline.get_uniform_location("far_distance"), 90000.0f);
+	glUniform1f(outline.get_uniform_location("blend_value"), blendValue);
+	glUniform1f(outline.get_uniform_location("flattening_value"), flatValue);
+	glUniform1f(outline.get_uniform_location("near_distance"), 60.0f);
+	glUniform1f(outline.get_uniform_location("far_distance"), 900.0f);
 	// Set outline colour
 	glUniform4fv(outline.get_uniform_location("outline_colour"), 1, value_ptr(vec4(0.0f, 0.0f, 0.0f, 1.0f)));
 	// Debug
@@ -507,7 +519,7 @@ void SetupLights()
 
 	// Point lights
 	pointLights[0].set_position(vec3(-15.0f, 4.0f, -15.0f));
-	pointLights[0].set_light_colour(vec4(1.0f, 0.2f, 0.3f, 1.0f));
+	pointLights[0].set_light_colour(vec4(100.0f, 50.2f, 50.3f, 1.0f));
 	pointLights[0].set_range(7.0f);
 
 	pointLights[1].set_position(vec3(-15.0f, 4.0f, 10.0f));
@@ -534,7 +546,6 @@ void SetupLights()
 	spotLights[1].set_direction(normalize(vec3(-0.4f, -5.0f, 2.0f)));
 	spotLights[1].set_range(35.0f);
 	spotLights[1].set_power(0.5f);
-
 }
 
 void SetupGeometry()
@@ -565,47 +576,47 @@ void SetupGeometry()
 
 	// Create game objects
 	// Ground object
-	gameObjects["floor"] = new RenderedObject(floorMesh, &specular, &textures["dirt"], &normals["dirt"]);
+	gameObjects["floor"] = new RenderedObject(floorMesh, &textures["dirt"]); // , &normals["dirt"]);
 	gameObjects["floor"]->get_mesh()->get_transform().position = vec3(0.0f, 0.0f, 0.0f);
 
 	// Player object
-	player = new Player(boxMesh, &specular, &textures["metal"], &normals["metal"]);
+	player = new Player(boxMesh, &textures["metal"], &normals["metal"]);
 
 	gameObjects["player"] = player;
 	gameObjects["player"]->get_mesh()->get_transform().position = vec3(-15.0f, 1.0f, -15.0f);
 	gameObjects["player"]->get_mesh()->get_transform().scale = vec3(5.0f, 2.0f, 10.0f);
 
-	gameObjects["turretBase"] = new RenderedObject(boxMesh, &specular, &textures["metal"], &normals["metal"]);
+	gameObjects["turretBase"] = new RenderedObject(boxMesh, &textures["metal"], &normals["metal"]);
 	gameObjects["turretBase"]->get_mesh()->get_transform().position = vec3(0.0f, 0.55f, 0.0f);
 	gameObjects["turretBase"]->set_parent(gameObjects["player"]);
 	gameObjects["turretBase"]->set_local_scale(vec3(3.5f, 1.0f, 3.5f));
 
-	gameObjects["turret"] = new RenderedObject(cylinderMesh, &specular, &textures["metal"], &normals["metal"]);
+	gameObjects["turret"] = new RenderedObject(cylinderMesh, &textures["metal"], &normals["metal"]);
 	gameObjects["turret"]->get_mesh()->get_transform().position = vec3(0.0f, 0.75f, 0.0f);
 	gameObjects["turret"]->set_parent(gameObjects["turretBase"]);
 	gameObjects["turret"]->set_local_scale(vec3(2.0f, 1.0f, 2.0f));
 
 	player->SetTurretObject(gameObjects["turret"]);
 
-	gameObjects["barrel"] = new RenderedObject(cylinderMesh, &specular, &textures["metal"], &normals["metal"]);
+	gameObjects["barrel"] = new RenderedObject(cylinderMesh, &textures["metal"], &normals["metal"]);
 	gameObjects["barrel"]->get_mesh()->get_transform().position = vec3(0.0f, 0.0f, -2.0f);
 	gameObjects["barrel"]->get_mesh()->get_transform().orientation = toQuat(orientate3(vec3(half_pi<float>(), 0.0f, 0.0f)));
 	gameObjects["barrel"]->set_parent(gameObjects["turret"]);
 	gameObjects["barrel"]->set_local_scale(vec3(1.0f, 3.0f, 1.0f));
 
 	// Some other objects
-	gameObjects["wall"] = new RenderedObject(boxMesh, &specular, &textures["brick"], &normals["brick"]);
+	gameObjects["wall"] = new RenderedObject(boxMesh, &textures["brick"], &normals["brick"]);
 	gameObjects["wall"]->get_mesh()->get_transform().position = vec3(1.0f, 1.0f, 0.0f);
 	gameObjects["wall"]->set_local_scale(vec3(3.0f, 3.0f, 1.0f));
 
-	gameObjects["wall2"] = new RenderedObject(boxMesh, &specular, &textures["brick"], &normals["brick"]);
+	gameObjects["wall2"] = new RenderedObject(boxMesh, &textures["brick"], &normals["brick"]);
 	gameObjects["wall2"]->get_mesh()->get_transform().position = vec3(4.0f, 1.0f, 0.0f);
 	gameObjects["wall2"]->set_local_scale(vec3(3.0f, 3.0f, 1.0f));
 
-	gameObjects["wall3"] = new RenderedObject(boxMesh, &specular, &textures["brick"], &normals["brick"]);
+	gameObjects["wall3"] = new RenderedObject(boxMesh, &textures["brick"], &normals["brick"]);
 	gameObjects["wall3"]->get_mesh()->get_transform().position = vec3(7.0f, 1.0f, 0.0f);
 	gameObjects["wall3"]->set_local_scale(vec3(3.0f, 3.0f, 1.0f));
 
-	gameObjects["sphere"] = new RenderedObject(sphereMesh, &specular, &textures["metal"], &normals["metal"]);
+	gameObjects["sphere"] = new RenderedObject(sphereMesh, &textures["metal"], &normals["metal"]);
 	gameObjects["sphere"]->get_mesh()->get_transform().position = vec3(-10.0f, 2.0f, 0.0f);
 }

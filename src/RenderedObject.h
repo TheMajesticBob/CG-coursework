@@ -10,7 +10,7 @@ class RenderedObject
 {
 public:
 	RenderedObject();
-	RenderedObject(mesh m, effect *e = nullptr, texture *t = nullptr, texture *n = nullptr) : my_mesh(m), my_eff(e), my_tex(t), my_normal(n) {}
+	RenderedObject(mesh m, texture *t = nullptr, texture *n = nullptr) : my_mesh(m), my_tex(t), my_normal(n) {}
 	~RenderedObject();
 
 	virtual void update(float delta_time);

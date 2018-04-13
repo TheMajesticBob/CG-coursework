@@ -6,7 +6,7 @@ class Player :
 {
 public:
 	Player();
-	Player(mesh m, effect *e, texture *t, texture *n);
+	Player(mesh m, texture *t, texture *n);
 	~Player();
 
 	void Initialize();
