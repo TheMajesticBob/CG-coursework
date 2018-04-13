@@ -37,9 +37,9 @@ layout (location = 3) out vec3 tangent_out;
 // Outgoing binormal
 layout (location = 4) out vec3 binormal_out;
 // Outgoing diffuse
-layout (location = 5) out vec3 diffuse_out;
+layout (location = 5) out vec4 diffuse_out;
 // Outgoing specular
-layout (location = 6) out vec3 specular_out;
+layout (location = 6) out vec4 specular_out;
 
 void main( void )
 {
@@ -55,6 +55,6 @@ void main( void )
 
 	tex_coord_out = tex_coord_in;
 
-	diffuse_out = vec3(mat.diffuse_reflection);
-	specular_out = vec3(mat.specular_reflection);
+	diffuse_out = mat.diffuse_reflection;
+	specular_out = mat.specular_reflection;
 }

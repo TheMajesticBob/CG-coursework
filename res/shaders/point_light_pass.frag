@@ -64,14 +64,18 @@ vec4 CalcPointLight(vec3 WorldPos, vec3 Normal)
     return Color / Attenuation;
 }
 
+vec2 CalcTexCoord()
+{
+   return gl_FragCoord.xy / gScreenSize;
+}
+
 void main()
 {
-   	vec2 TexCoord = tex_coord;
+   	vec2 TexCoord = CalcTexCoord();
    	vec3 WorldPos = texture(tPosition, TexCoord).xyz;
-   	vec3 Color = texture(tAlbedo, TexCoord).xyz;
+   	vec4 Color = texture(tAlbedo, TexCoord);
    	vec3 Normal = texture(tNormals, TexCoord).xyz;
+	Normal = normalize(Normal);
 
-   	// Normal = normalize(Normal);
-
-   	colour = vec4(Color, 1.0); // * CalcPointLight(WorldPos, Normal);
+   	colour = Color * CalcPointLight(WorldPos, Normal);
 }

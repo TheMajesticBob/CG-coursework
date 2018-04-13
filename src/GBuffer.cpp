@@ -22,9 +22,11 @@ bool GBuffer::Init(unsigned int screenWidth, unsigned int screenHeight)
 	glGenTextures(ARRAY_SIZE_IN_ELEMENTS(m_textures), m_textures);
 	glGenTextures(1, &m_depthTexture);
 
+	glGenTextures(1, &m_finalTexture);
+
 	for (unsigned int i = 0; i < ARRAY_SIZE_IN_ELEMENTS(m_textures); i++) {
 		glBindTexture(GL_TEXTURE_2D, m_textures[i]);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, screenWidth, screenHeight, 0, GL_RGB, GL_FLOAT, NULL);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, screenWidth, screenHeight, 0, GL_RGBA, GL_FLOAT, NULL);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -40,10 +42,10 @@ bool GBuffer::Init(unsigned int screenWidth, unsigned int screenHeight)
 
 	// final
 	glBindTexture(GL_TEXTURE_2D, m_finalTexture);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, screenWidth, screenHeight, 0, GL_RGBA, GL_FLOAT, NULL);
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT6, GL_TEXTURE_2D, m_finalTexture, 0);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, screenWidth, screenHeight, 0, GL_RGB, GL_FLOAT, NULL);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT5, GL_TEXTURE_2D, m_finalTexture, 0);
 
-	GLenum DrawBuffers[] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3, GL_COLOR_ATTACHMENT4 };
+	GLenum DrawBuffers[] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3 };
 	glDrawBuffers(ARRAY_SIZE_IN_ELEMENTS(DrawBuffers), DrawBuffers);
 
 	GLenum Status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
@@ -61,7 +63,8 @@ bool GBuffer::Init(unsigned int screenWidth, unsigned int screenHeight)
 void GBuffer::StartFrame()
 {
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_fbo);
-	glDrawBuffer(GL_COLOR_ATTACHMENT6);
+	glDrawBuffer(GL_COLOR_ATTACHMENT5);
+	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 	glClear(GL_COLOR_BUFFER_BIT);
 }
 
@@ -82,8 +85,7 @@ void GBuffer::BindForGeometryPass()
 	GLenum DrawBuffers[] = {	GL_COLOR_ATTACHMENT0,
 								GL_COLOR_ATTACHMENT1,
 								GL_COLOR_ATTACHMENT2, 
-								GL_COLOR_ATTACHMENT3,
-								GL_COLOR_ATTACHMENT4 };
+								GL_COLOR_ATTACHMENT3 };
 
 	glDrawBuffers(ARRAY_SIZE_IN_ELEMENTS(DrawBuffers), DrawBuffers);
 }
@@ -97,7 +99,7 @@ void GBuffer::BindForStencilPass()
 void GBuffer::BindForLightPass()
 {
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_fbo);
-	glDrawBuffer(GL_COLOR_ATTACHMENT6);
+	glDrawBuffer(GL_COLOR_ATTACHMENT5);
 
 	for (unsigned int i = 0; i < ARRAY_SIZE_IN_ELEMENTS(m_textures); i++) {
 		glActiveTexture(GL_TEXTURE0 + i);
@@ -109,10 +111,15 @@ void GBuffer::BindForFinalPass()
 {
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, m_fbo);
-	glReadBuffer(GL_COLOR_ATTACHMENT6);
+	glReadBuffer(GL_COLOR_ATTACHMENT5);
 }
 
 void GBuffer::SetReadBuffer(GBUFFER_TEXTURE_TYPE textureType)
 {
 	glReadBuffer(GL_COLOR_ATTACHMENT0 + textureType);
+}
+
+GLuint GBuffer::GetFinalTexture()
+{
+	return m_finalTexture;
 }

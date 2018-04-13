@@ -20,11 +20,12 @@ void main()
 	vec4 position = texture2D( tPosition, tex_coord );
 	vec4 normal = texture2D( tNormals, tex_coord );
 	vec4 diffuse = texture2D( tMatDiffuse, tex_coord );
+	vec4 specular = texture2D( tMatSpecular, tex_coord );
 
 	// Calculate colour to return
 	if( depthOnly == 1 )
 	{
-		colour = diffuse;
+		colour = position;
 	} else if( depthOnly == 2 ){
 		colour = normal;
 	} else {

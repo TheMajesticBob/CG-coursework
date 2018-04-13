@@ -226,7 +226,7 @@ bool render() {
 	DSGeometryPass();
 
 	// Light passes
-	/*
+	
 	glEnable(GL_STENCIL_TEST);
 
 	for (int i = 0; i < pointLights.size(); ++i)
@@ -237,7 +237,7 @@ bool render() {
 	}
 
 	glDisable(GL_STENCIL_TEST);
-	*/
+	
 	DSDirectionalLightPass();
 	
 	RenderFrameOnScreen();
@@ -319,35 +319,6 @@ void DSGeometryPass()
 		glUniform1i(deferredShading.get_uniform_location("normal_map"), 1);
 		// Render mesh
 		renderer::render(*m->get_mesh());
-	}
-
-	if (0) // Debug lights
-	{
-		for (int i = 0; i < pointLights.size(); ++i)
-		{
-			pLight.get_transform().position = pointLights[i].get_position();
-			pLight.get_transform().scale = vec3(CalcPointLightSphere(pointLights[i]));
-
-			auto M = pLight.get_transform().get_transform_matrix();
-			mat4 MVP = VP * M;
-
-			renderer::bind(textures["empty"], 0);
-			renderer::bind(textures["empty"], 1);
-
-			// Set MVP matrix uniform
-			glUniformMatrix4fv(deferredShading.get_uniform_location("MVP"), // Location of uniform
-				1,                               // Number of values - 1 mat4
-				GL_FALSE,                        // Transpose the matrix?
-				value_ptr(MVP));                 // Pointer to matrix data
-			glUniformMatrix4fv(deferredShading.get_uniform_location("M"), 1, GL_FALSE, value_ptr(M));
-			// Set N matrix uniform - remember - 3x3 matrix
-			glUniformMatrix3fv(deferredShading.get_uniform_location("N"), 1, GL_FALSE, value_ptr(pLight.get_transform().get_normal_matrix()));
-			// Set empty textures
-			glUniform1i(deferredShading.get_uniform_location("tex_diffuse"), 0);
-			glUniform1i(deferredShading.get_uniform_location("normal_map"), 1);
-
-			renderer::render(pLight);
-		}
 	}
 
 	glDepthMask(GL_FALSE);
@@ -471,17 +442,24 @@ void RenderFrameOnScreen()
 {
 	gBuffer.BindForFinalPass();
 
+	// renderer::set_render_target(frame);
+	glBlitFramebuffer(0, 0, screenSize.x, screenSize.y, 0, 0, screenSize.x, screenSize.y, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+
+	/*
+
 	renderer::bind(deferredRendering);
 
 	glUniform1i(deferredRendering.get_uniform_location("tPosition"), 0);
-	glUniform1i(deferredRendering.get_uniform_location("tAlbedo"), 1);
+	glUniform1i(deferredRendering.get_uniform_location("tAlbedo"), 4);
 	glUniform1i(deferredRendering.get_uniform_location("tNormals"), 2);
-	glUniform1i(deferredRendering.get_uniform_location("tDiffuse"), 3);
+	glUniform1i(deferredRendering.get_uniform_location("tMatDiffuse"), 3);
 
 	glUniform1i(deferredRendering.get_uniform_location("depthOnly"), depthOnly);
 	glUniformMatrix4fv(deferredRendering.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(mat4(1.0f)));
 
 	renderer::render(screen_quad);
+
+	*/
 }
 
 void RenderOutline()
