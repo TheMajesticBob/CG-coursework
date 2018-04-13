@@ -14,10 +14,10 @@ using namespace glm;
 map<string, RenderedObject*> gameObjects;
 
 // Shaders
-effect shadowEffect;
 effect specular;
 effect outline;
 
+effect stencilPass;
 effect dirLightPass;
 effect pointLightPass;
 
@@ -52,12 +52,13 @@ double mouse_x = 0.0, mouse_y = 0.0;
 void SetupLights();
 void SetupGeometry();
 
-void BeginLightPasses();
-void RenderShadowPass();
 void DSGeometryPass();
-void DSPointLightPass();
+void DSPointLightPass(int lightIndex);
+void DSStencilPass(int lightIndex);
 void DSDirectionalLightPass();
 void RenderFrameOnScreen();
+
+float CalcPointLightSphere(point_light light);
 
 int depthOnly = 0;
 
@@ -131,10 +132,6 @@ bool load_content() {
 	// Build effect
 	specular.build();
 
-	shadowEffect.add_shader("res/shaders/spot.vert", GL_VERTEX_SHADER);
-	shadowEffect.add_shader("res/shaders/spot.frag", GL_FRAGMENT_SHADER);
-	shadowEffect.build();
-
 	deferredShading.add_shader("res/shaders/deferred_shading.vert", GL_VERTEX_SHADER);
 	deferredShading.add_shader("res/shaders/deferred_shading.frag", GL_FRAGMENT_SHADER);
 	deferredShading.add_shader("res/shaders/part_normal_map.frag", GL_FRAGMENT_SHADER);
@@ -151,6 +148,9 @@ bool load_content() {
 	dirLightPass.add_shader("res/shaders/simple_texture.vert", GL_VERTEX_SHADER);
 	dirLightPass.add_shader("res/shaders/dir_light_pass.frag", GL_FRAGMENT_SHADER);
 	dirLightPass.build();
+
+	stencilPass.add_shader("res/shaders/simple_texture.vert", GL_VERTEX_SHADER);
+	stencilPass.build();
 
 	outline.add_shader("res/shaders/simple_texture.vert", GL_VERTEX_SHADER);
 	outline.add_shader("res/shaders/outline.frag", GL_FRAGMENT_SHADER);
@@ -220,13 +220,22 @@ bool update(float delta_time) {
 
 bool render() {
 
-	// Shadow pass
-	// RenderShadowPass();
+	gBuffer.StartFrame();
+
 	DSGeometryPass();
 
-	BeginLightPasses();
-	// Light pass
-	// DSPointLightPass();
+	// Light passes
+
+	glEnable(GL_STENCIL_TEST);
+
+	for (int i = 0; i < pointLights.size(); ++i)
+	{
+		// Point lights get a stencil test 
+		DSStencilPass(i);
+		DSPointLightPass(i);
+	}
+
+	glDisable(GL_STENCIL_TEST);
 
 	DSDirectionalLightPass();
 
@@ -247,71 +256,9 @@ void main() {
   application.run();
 }
 
-void RenderShadowPass()
-{
-	// Set render target to shadow map
-	renderer::set_render_target(shadow);
-	// Clear depth buffer bit
-	glClear(GL_DEPTH_BUFFER_BIT);
-	// Set face cull mode to front
-	glCullFace(GL_FRONT);
-
-	// We could just use the Camera's projection, 
-	// but that has a narrower FoV than the cone of the spot light, so we would get clipping.
-	// so we have yo create a new Proj Mat with a field of view of 90.
-	mat4 LightProjectionMat = perspective<float>(90.f, renderer::get_screen_aspect(), 0.1f, 1000.f);
-
-	// Bind shader
-	renderer::bind(shadowEffect);
-	// Render meshes
-	for (auto &e : gameObjects) {
-		auto m = e.second;
-		// Create MVP matrix
-		mat4 M = m->get_transform_matrix();
-		// *********************************
-		// View matrix taken from shadow map
-		mat4 V = shadow.get_view();
-		// *********************************
-		mat4 MVP = LightProjectionMat * V * M;
-		// Set MVP matrix uniform
-		glUniformMatrix4fv(shadowEffect.get_uniform_location("MVP"), // Location of uniform
-			1,                                      // Number of values - 1 mat4
-			GL_FALSE,                               // Transpose the matrix?
-			value_ptr(MVP));                        // Pointer to matrix data
-													// Render mesh
-		renderer::render(*m->get_mesh());
-	}
-	// *********************************
-	// Set render target back to the screen
-	renderer::set_render_target();
-	// Set face cull mode to back
-	glCullFace(GL_BACK);
-}
-
 void DSGeometryPass()
 {
-
-	/*
-	// Bind our FBO and set the viewport to the proper size
-	glBindFramebuffer(GL_FRAMEBUFFER, gBuffer);
-
-	// Specify what to render an start acquiring
-	GLenum buffers[] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2 };
-	glDrawBuffers(3, buffers);
-
-	glPushAttrib(GL_VIEWPORT_BIT);
-	glViewport(0, 0, renderer::get_screen_width(), renderer::get_screen_height());
-
-	// Clear the render targets
-	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-	glActiveTexture(GL_TEXTURE0);
-	glEnable(GL_TEXTURE_2D);
-	*/
-
-
-	gBuffer.BindForWriting();
+	gBuffer.BindForGeometryPass();
 
 	glDepthMask(GL_TRUE);
 	// Clear the render targets
@@ -319,22 +266,23 @@ void DSGeometryPass()
 	
 	glEnable(GL_DEPTH_TEST);
 
-	glDisable(GL_BLEND);
-
 	camera* currentCam = camController.GetActiveCamera();
+	mat4 V = currentCam->get_view();
+	mat4 P = currentCam->get_projection();
+	auto VP = P * V;
 	mat4 LightProjectionMat = perspective<float>(90.f, renderer::get_screen_aspect(), 0.1f, 1000.f);
+
+	// Bind effect
+	renderer::bind(deferredShading);
 
 	// Render meshes
 	for (auto &e : gameObjects)
 	{
 		auto m = e.second;
-		// Bind effect
-		renderer::bind(deferredShading);
 		// Create MVP matrix
 		mat4 M = m->get_transform_matrix();
-		mat4 V = currentCam->get_view();
-		mat4 P = currentCam->get_projection();
-		mat4 MVP = P * V * M;
+		mat4 MVP = VP * M;
+
 		// Set MVP matrix uniform
 		glUniformMatrix4fv(deferredShading.get_uniform_location("MVP"), // Location of uniform
 			1,                               // Number of values - 1 mat4
@@ -369,23 +317,37 @@ void DSGeometryPass()
 		renderer::render(*m->get_mesh());
 	}
 
+	if (0) // Debug lights
+	{
+		for (int i = 0; i < pointLights.size(); ++i)
+		{
+			pLight.get_transform().position = pointLights[i].get_position();
+			pLight.get_transform().scale = vec3(CalcPointLightSphere(pointLights[i]));
+
+			auto M = pLight.get_transform().get_transform_matrix();
+			mat4 MVP = VP * M;
+
+			renderer::bind(textures["empty"], 0);
+			renderer::bind(textures["empty"], 1);
+
+			// Set MVP matrix uniform
+			glUniformMatrix4fv(deferredShading.get_uniform_location("MVP"), // Location of uniform
+				1,                               // Number of values - 1 mat4
+				GL_FALSE,                        // Transpose the matrix?
+				value_ptr(MVP));                 // Pointer to matrix data
+			glUniformMatrix4fv(deferredShading.get_uniform_location("M"), 1, GL_FALSE, value_ptr(M));
+			glUniformMatrix4fv(deferredShading.get_uniform_location("MV"), 1, GL_FALSE, value_ptr(V * M));
+			// Set N matrix uniform - remember - 3x3 matrix
+			glUniformMatrix3fv(deferredShading.get_uniform_location("N"), 1, GL_FALSE, value_ptr(pLight.get_transform().get_normal_matrix()));
+			// Set empty textures
+			glUniform1i(deferredShading.get_uniform_location("tex_diffuse"), 0);
+			glUniform1i(deferredShading.get_uniform_location("normal_map"), 1);
+
+			renderer::render(pLight);
+		}
+	}
+
 	glDepthMask(GL_FALSE);
-
-	glDisable(GL_DEPTH_TEST);
-
-	// Stop acquiring and unbind the FBO
-	// glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	// glPopAttrib();
-}
-
-void BeginLightPasses()
-{
-	glEnable(GL_BLEND);
-	glBlendEquation(GL_FUNC_ADD);
-	glBlendFunc(GL_ONE, GL_ONE);
-
-	gBuffer.BindForReading();
-	glClear(GL_COLOR_BUFFER_BIT);
 }
 
 float CalcPointLightSphere(point_light light)
@@ -396,49 +358,84 @@ float CalcPointLightSphere(point_light light)
 	float linear_attenuation = light.get_linear_attenuation();
 	float quad_attenuation = light.get_quadratic_attenuation();
 	
-
 	float ret = (-linear_attenuation + sqrtf(linear_attenuation * linear_attenuation -
 		4 * quad_attenuation * (quad_attenuation - 256 * MaxChannel * light.get_constant_attenuation())))
-		/
-		(2 * quad_attenuation);
-	return ret;
+		/ (2 * quad_attenuation);
+	return ret / 3.0f;
 }
 
-void DSPointLightPass()
+void DSStencilPass(int lightIndex)
 {
+	camera* cam = camController.GetActiveCamera();
+	auto V = cam->get_view();
+	auto P = cam->get_projection();
+
+	gBuffer.BindForStencilPass();
+
+	// Set up needed bits
+	glEnable(GL_DEPTH_TEST);
+	glDisable(GL_CULL_FACE);
+	glClear(GL_STENCIL_BUFFER_BIT);
+
+	// Set stencil to always succeed, checking only with depth buffer
+	glStencilFunc(GL_ALWAYS, 0, 0);
+
+	// Back faces increase stencil value, front faces reduce it
+	glStencilOpSeparate(GL_BACK, GL_KEEP, GL_INCR_WRAP, GL_KEEP);
+	glStencilOpSeparate(GL_FRONT, GL_KEEP, GL_DECR_WRAP, GL_KEEP);
+
+	renderer::bind(stencilPass);
+
+	pLight.get_transform().position = pointLights[lightIndex].get_position();
+	pLight.get_transform().scale = vec3(CalcPointLightSphere(pointLights[lightIndex]));
+
+	auto M = pLight.get_transform().get_transform_matrix();
+	auto MVP = P * V * M;
+
+	renderer::bind(pointLights[lightIndex], "gPointLight");
+
+	glUniformMatrix4fv(deferredRendering.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(MVP));
+	renderer::render(pLight);
+}
+
+void DSPointLightPass(int lightIndex)
+{
+	gBuffer.BindForLightPass();
+
+	glStencilFunc(GL_NOTEQUAL, 0, 0xFF);
+
+	glDisable(GL_DEPTH_TEST);
+	glEnable(GL_BLEND);
+	glBlendEquation(GL_FUNC_ADD);
+	glBlendFunc(GL_ONE, GL_ONE);
+
+	glEnable(GL_CULL_FACE);
+	glCullFace(GL_FRONT);
+
 	renderer::bind(pointLightPass);
 	camera* cam = camController.GetActiveCamera();
 	auto V = cam->get_view();
 	auto P = cam->get_projection();
 
-	for (int i = 0; i < pointLights.size(); ++i)
-	{
-		struct point_light
-		{
-			vec4 light_colour;
-			vec3 position;
-			float constant;
-			float linear;
-			float quadratic;
-		};
+	pLight.get_transform().position = pointLights[lightIndex].get_position();
+	pLight.get_transform().scale = vec3(CalcPointLightSphere(pointLights[lightIndex]));
 
-		pLight.get_transform().position = pointLights[i].get_position();
-		pLight.get_transform().scale = vec3(CalcPointLightSphere(pointLights[i]));
+	auto M = pLight.get_transform().get_transform_matrix();
+	auto MVP = P * V * M;
 
-		auto M = pLight.get_transform().get_transform_matrix();
-		auto MVP = P * V * M;
+	renderer::bind(pointLights[lightIndex], "gPointLight");
+	glUniform3fv(pointLightPass.get_uniform_location("gEyeWorldPos"), 1, value_ptr(cam->get_position()));
+	glUniform2fv(pointLightPass.get_uniform_location("gScreenSize"), 1, value_ptr(screenSize));
 
-		renderer::bind(pointLights[i], "gPointLight");
-		glUniform3fv(pointLightPass.get_uniform_location("gEyeWorldPos"), 1, value_ptr(cam->get_position()));
-		glUniform2fv(pointLightPass.get_uniform_location("gScreenSize"), 1, value_ptr(screenSize));
+	glUniform1i(pointLightPass.get_uniform_location("tPosition"), 0);
+	glUniform1i(pointLightPass.get_uniform_location("tDiffuse"), 1);
+	glUniform1i(pointLightPass.get_uniform_location("tNormals"), 2);
 
-		glUniform1i(deferredRendering.get_uniform_location("tPosition"), 0);
-		glUniform1i(deferredRendering.get_uniform_location("tDiffuse"), 1);
-		glUniform1i(deferredRendering.get_uniform_location("tNormals"), 2);
+	glUniformMatrix4fv(pointLightPass.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(MVP));
+	renderer::render(pLight);
 
-		glUniformMatrix4fv(deferredRendering.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(MVP));
-		renderer::render(pLight);
-	}
+	glCullFace(GL_BACK);
+	glDisable(GL_BLEND);
 }
 
 void DSDirectionalLightPass()
@@ -446,30 +443,20 @@ void DSDirectionalLightPass()
 	renderer::bind(dirLightPass);
 
 	renderer::bind(ambientLight, "gDirectionalLight");
-	glUniform3fv(pointLightPass.get_uniform_location("gEyeWorldPos"), 1, value_ptr(camController.GetActiveCamera()->get_position()));
-	glUniform2fv(pointLightPass.get_uniform_location("gScreenSize"), 1, value_ptr(screenSize));
+	glUniform3fv(dirLightPass.get_uniform_location("gEyeWorldPos"), 1, value_ptr(camController.GetActiveCamera()->get_position()));
+	glUniform2fv(dirLightPass.get_uniform_location("gScreenSize"), 1, value_ptr(screenSize));
 
-	glUniform1i(deferredRendering.get_uniform_location("tPosition"), 0);
-	glUniform1i(deferredRendering.get_uniform_location("tDiffuse"), 1);
-	glUniform1i(deferredRendering.get_uniform_location("tNormals"), 2);
+	glUniform1i(dirLightPass.get_uniform_location("tPosition"), 0);
+	glUniform1i(dirLightPass.get_uniform_location("tDiffuse"), 1);
+	glUniform1i(dirLightPass.get_uniform_location("tNormals"), 2);
 
-	glUniformMatrix4fv(deferredRendering.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(mat4(1.0f)));
+	glUniformMatrix4fv(dirLightPass.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(mat4(1.0f)));
 	renderer::render(screen_quad);
 }
 
 void RenderFrameOnScreen()
 {
-	glDisable(GL_BLEND);
-
-	renderer::set_render_target();
-	// Bind screen plot effect
-	renderer::bind(deferredRendering);
-	
-	// Clear the frame
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-	// Set FBO for reading
-	gBuffer.BindForReading();
+	gBuffer.BindForFinalPass();
 
 	camera* currentCam = camController.GetActiveCamera();
 
@@ -482,20 +469,6 @@ void RenderFrameOnScreen()
 	glUniformMatrix4fv(deferredRendering.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(mat4(1.0f)));
 
 	renderer::render(screen_quad);
-	/*
-	// Reset texture
-	glActiveTexture(GL_TEXTURE0);
-	glDisable(GL_TEXTURE_2D);
-	glBindTexture(GL_TEXTURE_2D, 0);
-
-	glActiveTexture(GL_TEXTURE1);
-	glDisable(GL_TEXTURE_2D);
-	glBindTexture(GL_TEXTURE_2D, 0);
-
-	glActiveTexture(GL_TEXTURE2);
-	glDisable(GL_TEXTURE_2D);
-	glBindTexture(GL_TEXTURE_2D, 0);
-	*/
 }
 
 void RenderOutline()

@@ -16,8 +16,12 @@ public:
 
 	bool Init(unsigned int screenWidth, unsigned int screenHeight);
 
-	void BindForReading();
-	void BindForWriting();
+	void StartFrame();
+	void BindForGeometryPass();
+	void BindForStencilPass();
+	void BindForLightPass();
+	void BindForFinalPass();
+
 	void SetReadBuffer(GBUFFER_TEXTURE_TYPE textureType);
 
 	GLuint GetTexture(GBUFFER_TEXTURE_TYPE textureType);
@@ -28,5 +32,6 @@ private:
 	GLuint m_fbo;
 	GLuint m_textures[NUM_TEXTURES];
 	GLuint m_depthTexture;
+	GLuint m_finalTexture;
 };
 
