@@ -6,8 +6,8 @@ struct directional_light
 	vec3 light_dir;
 };
 
-uniform sampler2D tDiffuse; 
 uniform sampler2D tPosition;
+uniform sampler2D tDiffuse; 
 uniform sampler2D tNormals;
 
 uniform directional_light gDirectionalLight;
@@ -47,7 +47,7 @@ vec4 CalcLightInternal(directional_light Light,
         }
     }
 
-    return (AmbientColor + DiffuseColor + SpecularColor);
+    return vec4(100.0); // * (AmbientColor + DiffuseColor + SpecularColor);
 }
 
 vec4 CalcDirectionalLight(vec3 WorldPos, vec3 Normal)
@@ -60,11 +60,11 @@ vec4 CalcDirectionalLight(vec3 WorldPos, vec3 Normal)
 
 void main()
 {
-   	vec2 TexCoord = CalcTexCoord();
+   	vec2 TexCoord = tex_coord; //  CalcTexCoord();
    	vec3 WorldPos = texture(tPosition, TexCoord).xyz;
    	vec3 Color = texture(tDiffuse, TexCoord).xyz;
    	vec3 Normal = texture(tNormals, TexCoord).xyz;
    	Normal = normalize(Normal);
 
-   	colour = vec4(Color, 1.0) * CalcDirectionalLight(WorldPos, Normal);
+   	colour = vec4(100.0); // vec4(Color, 1.0) * CalcDirectionalLight(WorldPos, Normal);
 }

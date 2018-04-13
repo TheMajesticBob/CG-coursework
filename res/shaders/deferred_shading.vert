@@ -37,7 +37,7 @@ void main( void )
 	mat3 worldRotationInverse = transpose(mat3(M));
 	
 	gl_Position		= MVP * vec4( position, 1.0 );
-	vertex_position = MVP * vec4(position, 1.0);
+	vertex_position = MVP * vec4( position, 1.0 );
 	// vertex_position	= MV * gl_Vertex;
 	// gl_FrontColor	= vec4(1.0, 1.0, 1.0, 1.0);
 
