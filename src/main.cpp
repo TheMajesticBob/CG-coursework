@@ -42,6 +42,7 @@ chase_camera playerCamera;
 CameraController camController;
 
 // Post-process
+vec2 screenSize;
 frame_buffer frame;
 geometry screen_quad;
 
@@ -55,6 +56,8 @@ void BeginLightPasses();
 void RenderShadowPass();
 void DSGeometryPass();
 void DSPointLightPass();
+void DSDirectionalLightPass();
+void RenderFrameOnScreen();
 
 int depthOnly = 0;
 
@@ -80,11 +83,10 @@ bool initialise() {
 }
 
 bool load_content() {
-	const unsigned int SCR_WIDTH = renderer::get_screen_width();
-	const unsigned int SCR_HEIGHT = renderer::get_screen_height();
+	screenSize = vec2( renderer::get_screen_width(), renderer::get_screen_height() );
 
 	// Create frame buffer - use screen width and height
-	frame = frame_buffer(SCR_WIDTH, SCR_HEIGHT);
+	frame = frame_buffer(screenSize.x, screenSize.y);
 	// Create screen quad
 	vector<vec3> positions{ vec3(-1.0f, -1.0f, 0.0f), vec3(1.0f, -1.0f, 0.0f), vec3(-1.0f, 1.0f, 0.0f),
 		vec3(1.0f, 1.0f, 0.0f) };
@@ -93,7 +95,7 @@ bool load_content() {
 	screen_quad.add_buffer(tex_coords, BUFFER_INDEXES::TEXTURE_COORDS_0);
 	screen_quad.set_type(GL_TRIANGLE_STRIP);
 
-	shadow = shadow_map(SCR_WIDTH, SCR_HEIGHT);
+	shadow = shadow_map(screenSize.x, screenSize.y);
 
 	// Load up textures
 	textures["empty"] = texture("res/textures/empty_texture.png");
@@ -158,7 +160,7 @@ bool load_content() {
 	player->Initialize();
 
 	gBuffer = GBuffer();
-	gBuffer.Init(SCR_WIDTH, SCR_HEIGHT);
+	gBuffer.Init(screenSize.x, screenSize.y);
 
 	return true;
 }
@@ -224,7 +226,11 @@ bool render() {
 
 	BeginLightPasses();
 	// Light pass
-	DSPointLightPass();
+	// DSPointLightPass();
+
+	DSDirectionalLightPass();
+
+	RenderFrameOnScreen();
 	
   return true;
 }
@@ -337,7 +343,7 @@ void DSGeometryPass()
 		glUniformMatrix4fv(deferredShading.get_uniform_location("M"), 1, GL_FALSE, value_ptr(M));
 		glUniformMatrix4fv(deferredShading.get_uniform_location("MV"), 1, GL_FALSE, value_ptr(V * M));
 		// Set N matrix uniform - remember - 3x3 matrix
-		glUniformMatrix3fv(deferredShading.get_uniform_location("N"), 1, GL_FALSE, value_ptr(m->get_mesh()->get_transform().get_normal_matrix()));
+		glUniformMatrix3fv(deferredShading.get_uniform_location("N"), 1, GL_FALSE, value_ptr(m->get_normal_matrix()));
 
 		// Bind texture
 		if (m->get_texture() != nullptr)
@@ -368,7 +374,7 @@ void DSGeometryPass()
 	glDisable(GL_DEPTH_TEST);
 
 	// Stop acquiring and unbind the FBO
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	// glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	// glPopAttrib();
 }
 
@@ -400,78 +406,83 @@ float CalcPointLightSphere(point_light light)
 
 void DSPointLightPass()
 {
-	renderer::bind(deferredRendering);
+	renderer::bind(pointLightPass);
+	camera* cam = camController.GetActiveCamera();
+	auto V = cam->get_view();
+	auto P = cam->get_projection();
 
 	for (int i = 0; i < pointLights.size(); ++i)
 	{
+		struct point_light
+		{
+			vec4 light_colour;
+			vec3 position;
+			float constant;
+			float linear;
+			float quadratic;
+		};
+
 		pLight.get_transform().position = pointLights[i].get_position();
 		pLight.get_transform().scale = vec3(CalcPointLightSphere(pointLights[i]));
+
+		auto M = pLight.get_transform().get_transform_matrix();
+		auto MVP = P * V * M;
+
+		renderer::bind(pointLights[i], "gPointLight");
+		glUniform3fv(pointLightPass.get_uniform_location("gEyeWorldPos"), 1, value_ptr(cam->get_position()));
+		glUniform2fv(pointLightPass.get_uniform_location("gScreenSize"), 1, value_ptr(screenSize));
+
+		glUniform1i(deferredRendering.get_uniform_location("tPosition"), 0);
+		glUniform1i(deferredRendering.get_uniform_location("tDiffuse"), 1);
+		glUniform1i(deferredRendering.get_uniform_location("tNormals"), 2);
+
+		glUniformMatrix4fv(deferredRendering.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(MVP));
 		renderer::render(pLight);
 	}
 }
 
-void RenderLightPass()
+void DSDirectionalLightPass()
 {
-	// Set render target back to the screen
-	// renderer::set_render_target();
-	// Bind Tex effect
-	renderer::bind(deferredRendering);
-	// Bind FBO textures
-	
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	renderer::bind(dirLightPass);
 
-	gBuffer.BindForReading();
+	renderer::bind(ambientLight, "gDirectionalLight");
+	glUniform3fv(pointLightPass.get_uniform_location("gEyeWorldPos"), 1, value_ptr(camController.GetActiveCamera()->get_position()));
+	glUniform2fv(pointLightPass.get_uniform_location("gScreenSize"), 1, value_ptr(screenSize));
 
-	int w = renderer::get_screen_width();
-	int h = renderer::get_screen_height();
-	camera* currentCam = camController.GetActiveCamera();
-
-	GLsizei HalfWidth = (GLsizei)(w / 2.0f);
-	GLsizei HalfHeight = (GLsizei)(h / 2.0f);
-	
-	gBuffer.SetReadBuffer(GBuffer::GBUFFER_TEXTURE_TYPE_POSITION);
-	glBlitFramebuffer(0, 0, w, h,
-		0, 0, HalfWidth, HalfHeight, GL_COLOR_BUFFER_BIT, GL_LINEAR);
-
-	gBuffer.SetReadBuffer(GBuffer::GBUFFER_TEXTURE_TYPE_DIFFUSE);
-	glBlitFramebuffer(0, 0, w, h,
-		0, HalfHeight, HalfWidth, h, GL_COLOR_BUFFER_BIT, GL_LINEAR);
-
-	gBuffer.SetReadBuffer(GBuffer::GBUFFER_TEXTURE_TYPE_NORMAL);
-	glBlitFramebuffer(0, 0, w, h,
-		HalfWidth, HalfHeight, w, h, GL_COLOR_BUFFER_BIT, GL_LINEAR);
-
-	gBuffer.SetReadBuffer(GBuffer::GBUFFER_TEXTURE_TYPE_TEXCOORD);
-	glBlitFramebuffer(0, 0, w, h,
-		HalfWidth, 0, w, HalfHeight, GL_COLOR_BUFFER_BIT, GL_LINEAR);
-	
-	
-	glActiveTexture(GL_TEXTURE0);
-	glEnable(GL_TEXTURE_2D);
-	glBindTexture(GL_TEXTURE_2D, gBuffer.GetTexture(GBuffer::GBUFFER_TEXTURE_TYPE_DIFFUSE));
-	glUniform1i(deferredRendering.get_uniform_location("tDiffuse"), 0);
-
-	glActiveTexture(GL_TEXTURE1);
-	glEnable(GL_TEXTURE_2D);
-	glBindTexture(GL_TEXTURE_2D, gBuffer.GetTexture(GBuffer::GBUFFER_TEXTURE_TYPE_POSITION));
-	glUniform1i(deferredRendering.get_uniform_location("tPosition"), 1);
-
-	glActiveTexture(GL_TEXTURE2);
-	glEnable(GL_TEXTURE_2D);
-	glBindTexture(GL_TEXTURE_2D, gBuffer.GetTexture(GBuffer::GBUFFER_TEXTURE_TYPE_NORMAL));
+	glUniform1i(deferredRendering.get_uniform_location("tPosition"), 0);
+	glUniform1i(deferredRendering.get_uniform_location("tDiffuse"), 1);
 	glUniform1i(deferredRendering.get_uniform_location("tNormals"), 2);
 
-	glActiveTexture(GL_TEXTURE3);
-	glEnable(GL_TEXTURE_2D);
-	glBindTexture(GL_TEXTURE_2D, gBuffer.GetTexture(GBuffer::GBUFFER_TEXTURE_TYPE_TEXCOORD));
-	glUniform1i(deferredRendering.get_uniform_location("tTexCoords"), 3);
+	glUniformMatrix4fv(deferredRendering.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(mat4(1.0f)));
+	renderer::render(screen_quad);
+}
+
+void RenderFrameOnScreen()
+{
+	glDisable(GL_BLEND);
+
+	renderer::set_render_target();
+	// Bind screen plot effect
+	renderer::bind(deferredRendering);
+	
+	// Clear the frame
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	// Set FBO for reading
+	gBuffer.BindForReading();
+
+	camera* currentCam = camController.GetActiveCamera();
+
+	glUniform1i(deferredRendering.get_uniform_location("tPosition"), 0);
+	glUniform1i(deferredRendering.get_uniform_location("tDiffuse"), 1);
+	glUniform1i(deferredRendering.get_uniform_location("tNormals"), 2);
 
 	glUniform1i(deferredRendering.get_uniform_location("depthOnly"), depthOnly);
 	glUniform3fv(deferredRendering.get_uniform_location("cameraPosition"), 1, value_ptr(currentCam->get_position()));
 	glUniformMatrix4fv(deferredRendering.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(mat4(1.0f)));
 
 	renderer::render(screen_quad);
-	
+	/*
 	// Reset texture
 	glActiveTexture(GL_TEXTURE0);
 	glDisable(GL_TEXTURE_2D);
@@ -484,8 +495,11 @@ void RenderLightPass()
 	glActiveTexture(GL_TEXTURE2);
 	glDisable(GL_TEXTURE_2D);
 	glBindTexture(GL_TEXTURE_2D, 0);
+	*/
+}
 
-	/*
+void RenderOutline()
+{
 	renderer::set_render_target();
 	renderer::bind(outline);
 
@@ -493,10 +507,12 @@ void RenderLightPass()
 	glUniformMatrix4fv(outline.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(mat4(1.0)));
 	// Bind texture from frame buffer
 	renderer::bind(frame.get_frame(), 0);
-	// Set the tex uniform
-	glUniform1i(outline.get_uniform_location("tex"), 0);
+
+	glUniform1i(outline.get_uniform_location("tPosition"), 0);
+	glUniform1i(outline.get_uniform_location("tDiffuse"), 1);
+	glUniform1i(outline.get_uniform_location("tNormals"), 2);
 	// Bind depth texture
-	glActiveTexture(GL_TEXTURE1);
+	glActiveTexture(GL_TEXTURE3);
 	glEnable(GL_TEXTURE_2D);
 	glBindTexture(GL_TEXTURE_2D, gDepthTexture);
 	// Set the tex uniform
@@ -505,16 +521,15 @@ void RenderLightPass()
 	glUniform2fv(outline.get_uniform_location("screen_size"), 1, value_ptr(vec2(renderer::get_screen_width(), renderer::get_screen_height())));
 	// Set the T uniform
 	glUniform1f(outline.get_uniform_location("blend_value"), 50.0f);
-	glUniform1f(outline.get_uniform_location("flattening_value"), 0.1f);
-	glUniform1f(outline.get_uniform_location("near_distance"), 0.1f);
-	glUniform1f(outline.get_uniform_location("far_distance"), 1000.0f);
+	glUniform1f(outline.get_uniform_location("flattening_value"), -10.0f);
+	glUniform1f(outline.get_uniform_location("near_distance"), 6000.0f);
+	glUniform1f(outline.get_uniform_location("far_distance"), 90000.0f);
 	// Set outline colour
 	glUniform4fv(outline.get_uniform_location("outline_colour"), 1, value_ptr(vec4(0.0f, 0.0f, 0.0f, 1.0f)));
 	// Debug
 	glUniform1i(outline.get_uniform_location("depth_only"), depthOnly);
 	// Render the screen quad
 	renderer::render(screen_quad);
-	*/
 }
 
 void SetupLights()

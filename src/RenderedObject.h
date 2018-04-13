@@ -17,6 +17,7 @@ public:
 
 	mesh* get_mesh();
 	mat4 get_transform_matrix();
+	mat3 get_normal_matrix();
 	texture* get_texture();
 	texture* get_normal();
 

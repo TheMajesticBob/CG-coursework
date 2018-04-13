@@ -54,6 +54,16 @@ mat4 RenderedObject::get_transform_matrix()
 	return my_mesh.get_transform().get_transform_matrix();
 }
 
+mat3 RenderedObject::get_normal_matrix()
+{
+	if (parent != nullptr)
+	{
+		return mat3(get_transform_matrix()) * my_mesh.get_transform().get_normal_matrix();
+	}
+
+	return my_mesh.get_transform().get_normal_matrix();
+}
+
 vec3 RenderedObject::get_world_position()
 {
 	// To get world position just multiply local position by parent's transform matrix
