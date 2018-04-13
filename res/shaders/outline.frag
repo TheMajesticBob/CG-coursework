@@ -1,7 +1,10 @@
 #version 430 core
 
 // Incoming texture containing frame information
-uniform sampler2D tex;
+uniform sampler2D tPosition;
+uniform sampler2D tDiffuse; 
+uniform sampler2D tNormals;
+uniform sampler2D tTexCoord;
 
 uniform sampler2D depth;
 
@@ -65,7 +68,7 @@ void main() {
 	{
 		colour = vec4( vec3( falloffValue ), 1.0 );
 	} else {
-		colour = mix( texture( tex, tex_coord ), outline_colour, outlineValue );
+		colour = mix( texture( tDiffuse, tex_coord ), outline_colour, outlineValue );
 		colour.a = 1.0;
 	}
 }
