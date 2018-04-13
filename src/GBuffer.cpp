@@ -40,10 +40,10 @@ bool GBuffer::Init(unsigned int screenWidth, unsigned int screenHeight)
 
 	// final
 	glBindTexture(GL_TEXTURE_2D, m_finalTexture);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, screenWidth, screenHeight, 0, GL_RGB, GL_FLOAT, NULL);
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT4, GL_TEXTURE_2D, m_finalTexture, 0);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, screenWidth, screenHeight, 0, GL_RGBA, GL_FLOAT, NULL);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT6, GL_TEXTURE_2D, m_finalTexture, 0);
 
-	GLenum DrawBuffers[] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3 };
+	GLenum DrawBuffers[] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3, GL_COLOR_ATTACHMENT4 };
 	glDrawBuffers(ARRAY_SIZE_IN_ELEMENTS(DrawBuffers), DrawBuffers);
 
 	GLenum Status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
@@ -61,7 +61,7 @@ bool GBuffer::Init(unsigned int screenWidth, unsigned int screenHeight)
 void GBuffer::StartFrame()
 {
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_fbo);
-	glDrawBuffer(GL_COLOR_ATTACHMENT4);
+	glDrawBuffer(GL_COLOR_ATTACHMENT6);
 	glClear(GL_COLOR_BUFFER_BIT);
 }
 
@@ -81,7 +81,9 @@ void GBuffer::BindForGeometryPass()
 
 	GLenum DrawBuffers[] = {	GL_COLOR_ATTACHMENT0,
 								GL_COLOR_ATTACHMENT1,
-								GL_COLOR_ATTACHMENT2 };
+								GL_COLOR_ATTACHMENT2, 
+								GL_COLOR_ATTACHMENT3,
+								GL_COLOR_ATTACHMENT4 };
 
 	glDrawBuffers(ARRAY_SIZE_IN_ELEMENTS(DrawBuffers), DrawBuffers);
 }
@@ -94,7 +96,8 @@ void GBuffer::BindForStencilPass()
 
 void GBuffer::BindForLightPass()
 {
-	glDrawBuffer(GL_COLOR_ATTACHMENT4);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_fbo);
+	glDrawBuffer(GL_COLOR_ATTACHMENT6);
 
 	for (unsigned int i = 0; i < ARRAY_SIZE_IN_ELEMENTS(m_textures); i++) {
 		glActiveTexture(GL_TEXTURE0 + i);
@@ -106,7 +109,7 @@ void GBuffer::BindForFinalPass()
 {
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, m_fbo);
-	glReadBuffer(GL_COLOR_ATTACHMENT4);
+	glReadBuffer(GL_COLOR_ATTACHMENT6);
 }
 
 void GBuffer::SetReadBuffer(GBUFFER_TEXTURE_TYPE textureType)

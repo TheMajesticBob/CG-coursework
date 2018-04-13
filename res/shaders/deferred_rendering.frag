@@ -1,9 +1,10 @@
 #version 440
 
 uniform sampler2D tPosition;
-uniform sampler2D tDiffuse; 
+uniform sampler2D tAlbedo; 
 uniform sampler2D tNormals;
-uniform sampler2D tTexCoord;
+uniform sampler2D tMatDiffuse;
+uniform sampler2D tMatSpecular;
 
 uniform int depthOnly;
 
@@ -15,14 +16,16 @@ layout(location = 0) out vec4 colour;
 
 void main()
 {
-	vec4 image = texture2D( tDiffuse, tex_coord );
+	vec4 image = texture2D( tAlbedo, tex_coord );
 	vec4 position = texture2D( tPosition, tex_coord );
-	vec4 normal = normalize(texture2D( tNormals, tex_coord ));
-	vec4 texCoord = texture2D(tTexCoord, tex_coord);
+	vec4 normal = texture2D( tNormals, tex_coord );
+	vec4 diffuse = texture2D( tMatDiffuse, tex_coord );
 
 	// Calculate colour to return
 	if( depthOnly == 1 )
 	{
+		colour = diffuse;
+	} else if( depthOnly == 2 ){
 		colour = normal;
 	} else {
 		colour = image;

@@ -1,13 +1,19 @@
 #version 440
+struct material {
+  vec4 emissive;
+  vec4 diffuse_reflection;
+  vec4 specular_reflection;
+  float shininess;
+};
 
 // Model transformation matrix (World matrix)
 uniform mat4 M;
-// Model View matrix
-uniform mat4 MV;
 // Transformation matrix
 uniform mat4 MVP;
 // Normal matrix
 uniform mat3 N;
+// Material
+uniform material mat;
 
 // Incoming position
 layout (location = 0) in vec3 position;
@@ -30,16 +36,15 @@ layout (location = 2) out vec3 transformed_normal;
 layout (location = 3) out vec3 tangent_out;
 // Outgoing binormal
 layout (location = 4) out vec3 binormal_out;
+// Outgoing diffuse
+layout (location = 5) out vec3 diffuse_out;
+// Outgoing specular
+layout (location = 6) out vec3 specular_out;
 
 void main( void )
 {
-	// Move the normals back from the camera space to the world space
-	mat3 worldRotationInverse = transpose(mat3(M));
-	
 	gl_Position		= MVP * vec4( position, 1.0 );
-	vertex_position = MVP * vec4( position, 1.0 );
-	// vertex_position	= MV * gl_Vertex;
-	// gl_FrontColor	= vec4(1.0, 1.0, 1.0, 1.0);
+	vertex_position = M * vec4( position, 1.0 );
 
 	// Transform normal
 	transformed_normal = N * normal;
@@ -49,4 +54,7 @@ void main( void )
 	binormal_out = N * binormal;
 
 	tex_coord_out = tex_coord_in;
+
+	diffuse_out = vec3(mat.diffuse_reflection);
+	specular_out = vec3(mat.specular_reflection);
 }

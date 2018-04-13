@@ -9,7 +9,7 @@ struct point_light
 };
 
 uniform sampler2D tPosition;
-uniform sampler2D tDiffuse; 
+uniform sampler2D tAlbedo; 
 uniform sampler2D tNormals;
 
 uniform point_light gPointLight;
@@ -20,11 +20,6 @@ uniform vec2 gScreenSize;
 layout(location = 0) in vec2 tex_coord;
 
 layout(location = 0) out vec4 colour;
-
-vec2 CalcTexCoord()
-{
-   return gl_FragCoord.xy / gScreenSize;
-}
 
 vec4 CalcLightInternal(point_light Light,
 					   vec3 LightDirection,
@@ -71,11 +66,12 @@ vec4 CalcPointLight(vec3 WorldPos, vec3 Normal)
 
 void main()
 {
-   	vec2 TexCoord = CalcTexCoord();
+   	vec2 TexCoord = tex_coord;
    	vec3 WorldPos = texture(tPosition, TexCoord).xyz;
-   	vec3 Color = texture(tDiffuse, TexCoord).xyz;
+   	vec3 Color = texture(tAlbedo, TexCoord).xyz;
    	vec3 Normal = texture(tNormals, TexCoord).xyz;
-   	Normal = normalize(Normal);
 
-   	colour = vec4(Color, 1.0) * CalcPointLight(WorldPos, Normal);
+   	// Normal = normalize(Normal);
+
+   	colour = vec4(Color, 1.0); // * CalcPointLight(WorldPos, Normal);
 }
