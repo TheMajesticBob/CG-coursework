@@ -31,7 +31,7 @@ vec2 CalcTexCoord()
 void main() {
 	// Calculate texel size and coordinate offset for edge detection
 	vec2 texelSize = 1.0 / screen_size;
-	vec2 blockSize = clamp( ceil( screen_size / 256.0 ), 0.0, 2.0 ) * texelSize;
+	vec2 blockSize = clamp( ceil( screen_size / 256.0 ), 1.0, 1.5 ) * texelSize;
 
 	vec2 coord = CalcTexCoord();
 

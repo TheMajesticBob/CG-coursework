@@ -5,10 +5,15 @@
 #include "RenderedObject.h"
 #include "Player.h"
 #include "GBuffer.h"
+#include "MarchingCubes.h"
 
 using namespace std;
+using namespace std::chrono;
 using namespace graphics_framework;
 using namespace glm;
+
+extern int edgeTable[256];
+extern int triTable[256][16];
 
 // Geometry
 map<string, RenderedObject*> gameObjects;
@@ -23,6 +28,24 @@ effect pointLightPass;
 
 effect deferredShading;
 effect deferredRendering;
+
+// Smoke vars
+effect computeShader;
+effect smokeShader;
+GLuint vao;
+
+const unsigned int MAX_PARTICLES = 16;
+const float RESOLUTION = 4;
+const float CUBE_SIZE = 8.0f;
+
+vec4 smokePositions[MAX_PARTICLES];
+vec4 smokeVelocitys[MAX_PARTICLES];
+GLuint G_Position_buffer, G_Velocity_buffer;
+
+geometry cube;
+vec3 cubeSize = vec3(8.0f, 24.0f, 16.0f);
+vec3 cubeStep = vec3(1.0f / RESOLUTION);
+arc_ball_camera cam;
 
 // Lights
 mesh pLight;
@@ -49,7 +72,7 @@ geometry screen_quad;
 // Input vars
 double mouse_x = 0.0, mouse_y = 0.0;
 float flatValue = 150.0f;
-float blendValue = 100.0f;
+float blendValue = 0.5f; // 100.0f;
 
 void SetupLights();
 void SetupGeometry();
@@ -149,6 +172,171 @@ bool load_content() {
 	outline.add_shader("res/shaders/outline.frag", GL_FRAGMENT_SHADER);
 	outline.build();
 
+	computeShader.add_shader("res/shaders/smoke.comp", GL_COMPUTE_SHADER);
+	computeShader.build();
+
+	default_random_engine rand(duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
+	uniform_real_distribution<float> dist;
+
+	// Initilise particles
+	for (unsigned int i = 0; i < MAX_PARTICLES; ++i) {
+		smokePositions[i] = vec4((cubeSize.x / 2.0f) * dist(rand) - cubeSize.x / 4.0f, 8.0f * dist(rand), (cubeSize.z / 2.0f) * dist(rand) - cubeSize.z / 4.0f, dist(rand) );
+		// smokePositions[i] = vec4(((14.0f * dist(rand)) - 7.0f), 8.0f * dist(rand), 0.0f, 1.0f);
+		smokeVelocitys[i] = vec4(0.0f, 0.1f + (6.0f * dist(rand)), 0.0f, 0.0f);
+	}
+
+	// a useless vao, but we need it bound or we get errors.
+	glGenVertexArrays(1, &vao);
+	glBindVertexArray(vao);
+	// *********************************
+	//Generate Position Data buffer
+	glGenBuffers(1, &G_Position_buffer);
+	// Bind as GL_SHADER_STORAGE_BUFFER
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, G_Position_buffer);
+	// Send Data to GPU, use GL_DYNAMIC_DRAW
+	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(vec4) * MAX_PARTICLES, smokePositions, GL_DYNAMIC_DRAW);
+
+	// Generate Velocity Data buffer
+	glGenBuffers(1, &G_Velocity_buffer);
+	// Bind as GL_SHADER_STORAGE_BUFFER
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, G_Velocity_buffer);
+	// Send Data to GPU, use GL_DYNAMIC_DRAW
+	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(vec4) * MAX_PARTICLES, smokeVelocitys, GL_DYNAMIC_DRAW);
+
+	// *********************************
+	//Unbind
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+	// Smoke
+
+	// Set camera properties
+	cam.set_position(vec3(0.0f, 10.0f, 10.0f));
+	cam.set_target(vec3(0.0f, 0.0f, 0.0f));
+	cam.set_projection(quarter_pi<float>(), renderer::get_screen_aspect(), 0.1f, 1000.0f);
+
+	smokeShader.add_shader("res/shaders/smoke.vert", GL_VERTEX_SHADER);
+	smokeShader.add_shader("res/shaders/smoke.geom", GL_GEOMETRY_SHADER);
+	smokeShader.add_shader("res/shaders/smoke.frag", GL_FRAGMENT_SHADER);
+	smokeShader.build();
+
+	vector<vec3> pos;
+	printf("Cube step: %f, StepSize: %f", cubeStep.x, cubeStep.x * cubeSize.x);
+	
+	for (float k = -cubeSize.z / 2.0f; k <= cubeSize.z / 2.0f; k += cubeStep.z)
+	{
+		for (float j = -cubeSize.y / 2.0f; j <= cubeSize.y / 2.0f; j += cubeStep.y)
+		{
+			for (float i = -cubeSize.x / 2.0f; i <= cubeSize.x / 2.0f; i += cubeStep.x) {
+				pos.push_back(vec3(i, j, k));
+			}
+		}
+	}
+
+	// Add to the geometry
+	cube.add_buffer(pos, BUFFER_INDEXES::POSITION_BUFFER);
+	cube.set_type(GL_POINTS);
+
+	GLuint edgeTableTexture;
+	GLuint triTableTexture;
+	GLuint dataTexture;
+
+	GLuint program = smokeShader.get_program();
+
+	//Bind program object for parameters setting
+	glUseProgramObjectARB(program);
+
+	//Edge Table texture//
+	//This texture store the 256 different configurations of a marching cube.
+	//This is a table accessed with a bitfield of the 8 cube edges states
+	//(edge cut by isosurface or totally in or out).
+	//(cf. MarchingCubes.cpp)
+	glGenTextures(1, &edgeTableTexture);
+	glActiveTexture(GL_TEXTURE1);
+	//glEnable(GL_TEXTURE_2D);
+	glBindTexture(GL_TEXTURE_2D, edgeTableTexture);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+	//We create an integer texture with new GL_EXT_texture_integer formats
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RG16I, 256, 1, 0,
+		GL_RED_INTEGER, GL_INT, &edgeTable);
+
+	//Triangle Table texture//
+	//This texture store the vertex index list for
+	//generating the triangles of each configurations.
+	//(cf. MarchingCubes.cpp)
+	glGenTextures(1, &triTableTexture);
+	glActiveTexture(GL_TEXTURE2);
+	//glEnable(GL_TEXTURE_2D);
+	glBindTexture(GL_TEXTURE_2D, triTableTexture);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RG16I, 16, 256, 0,
+		GL_RED_INTEGER, GL_INT, &triTable);
+
+	//Datafield//
+	//Store the volume data to polygonise
+	glGenTextures(1, &dataTexture);
+	glActiveTexture(GL_TEXTURE0);
+	//glEnable(GL_TEXTURE_3D);
+	glBindTexture(GL_TEXTURE_3D, dataTexture);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+	//Generate a distance field to the center of the cube
+
+	float* dataField = new float[128 * 128 * 128];
+	for (int k = 0; k < 128; k++)
+		for (int j = 0; j < 128; j++)
+		{
+			float dist;
+			for (int i = 0; i < 128; i++) {
+				dist = distance(vec3(i, j, k), vec3(64.0f)) / 64.0f;
+				if (k == 64 && j == 64)
+				{
+					// printf("Point (%d, %d,%d) has value of %f\n\r", i, j, k, dist);
+				}
+				dataField[i + j * 128 + k * 128 * 128] = dist; // distance(vec3(i, j, k), vec3(64) / 64.0f);
+			}
+
+		}
+	glTexImage3D(GL_TEXTURE_3D, 0, GL_R32F, 128, 128, 128, 0,
+		GL_RED, GL_FLOAT, dataField);
+	delete[] dataField;
+	dataField = NULL;
+	////Samplers assignment///
+	glUniform1iARB(glGetUniformLocationARB(program, "dataFieldTex"), 0);
+	glUniform1iARB(glGetUniformLocationARB(program, "edgeTableTex"), 1);
+	glUniform1iARB(glGetUniformLocationARB(program, "triTableTex"), 2);
+
+	////Uniforms parameters////
+	//Initial isolevel
+	glUniform1fARB(glGetUniformLocationARB(program, "isolevel"), 1.0f);
+	//Step in data 3D texture for gradient computation (lighting)
+	glUniform3fARB(glGetUniformLocationARB(program, "dataStep"), 1.0f / 128.0f, 1.0f / 128.0f, 1.0f / 128.0f);
+	glUniform3fvARB(glGetUniformLocationARB(program, "bounds"), 1, value_ptr(cubeSize));
+
+	cubeStep /= 2.0f;
+	//Decal for each vertex in a marching cube
+	glUniform3fARB(glGetUniformLocationARB(program, "vertDecals[0]"), -cubeStep.x, -cubeStep.y, -cubeStep.z);
+	glUniform3fARB(glGetUniformLocationARB(program, "vertDecals[1]"), cubeStep.x, -cubeStep.y, -cubeStep.z);
+	glUniform3fARB(glGetUniformLocationARB(program, "vertDecals[2]"), cubeStep.x, cubeStep.y, -cubeStep.z);
+	glUniform3fARB(glGetUniformLocationARB(program, "vertDecals[3]"), -cubeStep.x, cubeStep.y, -cubeStep.z);
+	glUniform3fARB(glGetUniformLocationARB(program, "vertDecals[4]"), -cubeStep.x, -cubeStep.y, cubeStep.z);
+	glUniform3fARB(glGetUniformLocationARB(program, "vertDecals[5]"), cubeStep.x, -cubeStep.y, cubeStep.z);
+	glUniform3fARB(glGetUniformLocationARB(program, "vertDecals[6]"), cubeStep.x, cubeStep.y, cubeStep.z);
+	glUniform3fARB(glGetUniformLocationARB(program, "vertDecals[7]"), -cubeStep.x, cubeStep.y, cubeStep.z);
+	
+	glUseProgramObjectARB(0);
+	// End Smoke
+
 	auto player = (Player*)gameObjects["player"];
 	player->Initialize();
 
@@ -160,6 +348,10 @@ bool load_content() {
 
 
 bool update(float delta_time) {
+	renderer::bind(computeShader);
+	glUniform1f(computeShader.get_uniform_location("delta_time"), delta_time);
+	glUniform3fv(computeShader.get_uniform_location("max_dims"), 1, value_ptr(cubeSize/2.0f));
+
 	InputHandler::Update(delta_time);
 
 	camera* currentCam = camController.GetActiveCamera();
@@ -198,11 +390,11 @@ bool update(float delta_time) {
 	}
 
 	if (glfwGetKey(renderer::get_window(), 'C')) {
-		blendValue -= 0.5f;
+		blendValue -= 0.05f;
 		printf("%f\n\r", blendValue);
 	}
 	if (glfwGetKey(renderer::get_window(), 'V')) {
-		blendValue += 0.5f;
+		blendValue += 0.05f;
 		printf("%f\n\r", blendValue);
 	}
 
@@ -229,6 +421,46 @@ bool update(float delta_time) {
 }
 
 bool render() {
+	// Bind Compute Shader
+	renderer::bind(computeShader);
+	// Bind data as SSBO
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, G_Position_buffer);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, G_Velocity_buffer);
+	// Dispatch
+	glDispatchCompute(MAX_PARTICLES, 1, 1);
+	// Sync, wait for completion
+	glMemoryBarrier(GL_ALL_BARRIER_BITS);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+	renderer::bind(smokeShader);
+
+	camera* currentCam = camController.GetActiveCamera();
+	mat4 M = mat4(1.0f) * 5.0f;
+	mat4 V = currentCam->get_view();
+	mat4 P = currentCam->get_projection();
+	auto MVP = P * V * M;
+
+	//Current isolevel uniform parameter setting
+	glUniform1f(smokeShader.get_uniform_location("isolevel"), blendValue);
+	glUniform1i(smokeShader.get_uniform_location("gMetaballCount"), MAX_PARTICLES);
+
+	// Set MV, and P matrix uniforms seperatly
+	glUniformMatrix4fv(smokeShader.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(MVP));
+	glUniformMatrix4fv(smokeShader.get_uniform_location("MV"), 1, GL_FALSE, value_ptr(V));
+	glUniformMatrix4fv(smokeShader.get_uniform_location("P"), 1, GL_FALSE, value_ptr(P));
+	
+
+	renderer::bind(textures["brick"], 0);
+	glUniform1i(smokeShader.get_uniform_location("tex"), 0);
+
+	// Bind position buffer as GL_ARRAY_BUFFER
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, G_Position_buffer);
+	// Render
+	renderer::render(cube);
+	// Tidy up
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+	return true;
 
 	gBuffer.StartFrame();
 
