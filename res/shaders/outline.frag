@@ -79,7 +79,7 @@ void main() {
 		colour = vec4( vec3( outlineValue ), 1.0 );
 	} else if( depth_only == 2 )
 	{
-		colour = edgeDepth;
+		colour = mainNormal;
 	} else {
 		colour = mix( texture( tAlbedo, tex_coord ), outline_colour, outlineValue );
 		colour.a = 1.0;

@@ -34,13 +34,14 @@ effect computeShader;
 effect smokeShader;
 GLuint vao;
 
-const unsigned int MAX_PARTICLES = 16;
+const unsigned int MAX_PARTICLES = 24;
 const float RESOLUTION = 4;
 const float CUBE_SIZE = 8.0f;
 
 vec4 smokePositions[MAX_PARTICLES];
 vec4 smokeVelocitys[MAX_PARTICLES];
 GLuint G_Position_buffer, G_Velocity_buffer;
+GLuint triTableTexture;
 
 geometry cube;
 vec3 cubeSize = vec3(8.0f, 24.0f, 16.0f);
@@ -69,13 +70,22 @@ vec2 screenSize;
 frame_buffer frame;
 geometry screen_quad;
 
+// HDR + BLOOM
+bool firstFrame = true;
+GLuint pingpongColorBuffer[2];
+GLuint pingpongFBO[2];
+float exposure, lastExposure;
+effect exposureShader;
+
 // Input vars
 double mouse_x = 0.0, mouse_y = 0.0;
-float flatValue = 150.0f;
+float flatValue = 1.0f;
 float blendValue = 0.5f; // 100.0f;
 
 void SetupLights();
 void SetupGeometry();
+
+void CalculateExposure();
 
 void DSGeometryPass();
 void DSPointLightPass(int lightIndex);
@@ -110,6 +120,8 @@ bool initialise() {
 }
 
 bool load_content() {
+	lastExposure = exposure = 1.0f;
+
 	screenSize = vec2( renderer::get_screen_width(), renderer::get_screen_height() );
 
 	// Create frame buffer - use screen width and height
@@ -129,6 +141,12 @@ bool load_content() {
 	textures["dirt"] = texture("res/textures/dirt.jpg");
 	textures["brick"] = texture("res/textures/brick.jpg");
 	textures["metal"] = texture("res/textures/metal.png");
+
+	// Colour scale from red to black
+	vector<vec4> colour_data{ vec4(0.12f, 0.12f, 0.12f, 1.0f), vec4(0.12f, 0.12f, 0.12f, 1.0f),vec4(0.12f, 0.12f, 0.12f, 1.0f),vec4(0.12f, 0.12f, 0.12f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f),
+		vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f) };
+	// Create 1D 4x1 texture from colour_data
+	textures["CS_DATA"] = texture(colour_data, 4, 1, false, false);
 
 	normals["empty"] = texture("res/textures/normals/empty_normal.png");
 	normals["dirt"] = texture("res/textures/normals/dirt_normal.jpg");
@@ -172,6 +190,10 @@ bool load_content() {
 	outline.add_shader("res/shaders/outline.frag", GL_FRAGMENT_SHADER);
 	outline.build();
 
+	exposureShader.add_shader("res/shaders/simple_texture.vert", GL_VERTEX_SHADER);
+	exposureShader.add_shader("res/shaders/simple_texture.frag", GL_FRAGMENT_SHADER);
+	exposureShader.build();
+
 	computeShader.add_shader("res/shaders/smoke.comp", GL_COMPUTE_SHADER);
 	computeShader.build();
 
@@ -180,9 +202,9 @@ bool load_content() {
 
 	// Initilise particles
 	for (unsigned int i = 0; i < MAX_PARTICLES; ++i) {
-		smokePositions[i] = vec4((cubeSize.x / 2.0f) * dist(rand) - cubeSize.x / 4.0f, 8.0f * dist(rand), (cubeSize.z / 2.0f) * dist(rand) - cubeSize.z / 4.0f, dist(rand) );
+		smokePositions[i] = vec4((cubeSize.x / 2.0f) * dist(rand) - cubeSize.x / 4.0f, 8.0f * dist(rand), (cubeSize.z / 2.0f) * dist(rand) - cubeSize.z / 4.0f, dist(rand) + 0.1f );
 		// smokePositions[i] = vec4(((14.0f * dist(rand)) - 7.0f), 8.0f * dist(rand), 0.0f, 1.0f);
-		smokeVelocitys[i] = vec4(0.0f, 0.1f + (6.0f * dist(rand)), 0.0f, 0.0f);
+		smokeVelocitys[i] = vec4(0.0f, 0.4f + (2.0f * dist(rand)), 0.0f, 0.0f);
 	}
 
 	// a useless vao, but we need it bound or we get errors.
@@ -237,31 +259,12 @@ bool load_content() {
 	cube.set_type(GL_POINTS);
 
 	GLuint edgeTableTexture;
-	GLuint triTableTexture;
 	GLuint dataTexture;
 
 	GLuint program = smokeShader.get_program();
 
 	//Bind program object for parameters setting
 	glUseProgramObjectARB(program);
-
-	//Edge Table texture//
-	//This texture store the 256 different configurations of a marching cube.
-	//This is a table accessed with a bitfield of the 8 cube edges states
-	//(edge cut by isosurface or totally in or out).
-	//(cf. MarchingCubes.cpp)
-	glGenTextures(1, &edgeTableTexture);
-	glActiveTexture(GL_TEXTURE1);
-	//glEnable(GL_TEXTURE_2D);
-	glBindTexture(GL_TEXTURE_2D, edgeTableTexture);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-	//We create an integer texture with new GL_EXT_texture_integer formats
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RG16I, 256, 1, 0,
-		GL_RED_INTEGER, GL_INT, &edgeTable);
 
 	//Triangle Table texture//
 	//This texture store the vertex index list for
@@ -279,38 +282,6 @@ bool load_content() {
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RG16I, 16, 256, 0,
 		GL_RED_INTEGER, GL_INT, &triTable);
 
-	//Datafield//
-	//Store the volume data to polygonise
-	glGenTextures(1, &dataTexture);
-	glActiveTexture(GL_TEXTURE0);
-	//glEnable(GL_TEXTURE_3D);
-	glBindTexture(GL_TEXTURE_3D, dataTexture);
-	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-	//Generate a distance field to the center of the cube
-
-	float* dataField = new float[128 * 128 * 128];
-	for (int k = 0; k < 128; k++)
-		for (int j = 0; j < 128; j++)
-		{
-			float dist;
-			for (int i = 0; i < 128; i++) {
-				dist = distance(vec3(i, j, k), vec3(64.0f)) / 64.0f;
-				if (k == 64 && j == 64)
-				{
-					// printf("Point (%d, %d,%d) has value of %f\n\r", i, j, k, dist);
-				}
-				dataField[i + j * 128 + k * 128 * 128] = dist; // distance(vec3(i, j, k), vec3(64) / 64.0f);
-			}
-
-		}
-	glTexImage3D(GL_TEXTURE_3D, 0, GL_R32F, 128, 128, 128, 0,
-		GL_RED, GL_FLOAT, dataField);
-	delete[] dataField;
-	dataField = NULL;
 	////Samplers assignment///
 	glUniform1iARB(glGetUniformLocationARB(program, "dataFieldTex"), 0);
 	glUniform1iARB(glGetUniformLocationARB(program, "edgeTableTex"), 1);
@@ -336,6 +307,41 @@ bool load_content() {
 	
 	glUseProgramObjectARB(0);
 	// End Smoke
+
+	glGenFramebuffers(2, pingpongFBO);
+	glGenTextures(2, pingpongColorBuffer);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, pingpongFBO[0]);
+
+	glBindTexture(GL_TEXTURE_2D, pingpongColorBuffer[0]);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, screenSize.x, screenSize.y, 0, GL_RGBA, GL_FLOAT, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, pingpongColorBuffer[0], 0);
+	GLenum Status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+
+	if (Status != GL_FRAMEBUFFER_COMPLETE) {
+		printf("FB error, status: 0x%x\n", Status);
+		return false;
+	}
+
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, pingpongFBO[1]);
+	glBindTexture(GL_TEXTURE_2D, pingpongColorBuffer[1]);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, screenSize.x, screenSize.y, 0, GL_RGBA, GL_FLOAT, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, pingpongColorBuffer[1], 0);
+	Status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+
+	if (Status != GL_FRAMEBUFFER_COMPLETE) {
+		printf("FB error, status: 0x%x\n", Status);
+		return false;
+	}
+
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 
 	auto player = (Player*)gameObjects["player"];
 	player->Initialize();
@@ -381,11 +387,11 @@ bool update(float delta_time) {
 	}
 
 	if (glfwGetKey(renderer::get_window(), 'Z')) {
-		flatValue -= 1.0f;
+		flatValue -= .2f * delta_time;
 		printf("%f\n\r", flatValue);
 	}
 	if (glfwGetKey(renderer::get_window(), 'X')) {
-		flatValue += 1.0f;
+		flatValue += .2f * delta_time;
 		printf("%f\n\r", flatValue);
 	}
 
@@ -421,6 +427,9 @@ bool update(float delta_time) {
 }
 
 bool render() {
+
+	CalculateExposure();
+
 	// Bind Compute Shader
 	renderer::bind(computeShader);
 	// Bind data as SSBO
@@ -431,43 +440,19 @@ bool render() {
 	// Sync, wait for completion
 	glMemoryBarrier(GL_ALL_BARRIER_BITS);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 1);
 
-	renderer::bind(smokeShader);
+	// return true;
 
-	camera* currentCam = camController.GetActiveCamera();
-	mat4 M = mat4(1.0f) * 5.0f;
-	mat4 V = currentCam->get_view();
-	mat4 P = currentCam->get_projection();
-	auto MVP = P * V * M;
-
-	//Current isolevel uniform parameter setting
-	glUniform1f(smokeShader.get_uniform_location("isolevel"), blendValue);
-	glUniform1i(smokeShader.get_uniform_location("gMetaballCount"), MAX_PARTICLES);
-
-	// Set MV, and P matrix uniforms seperatly
-	glUniformMatrix4fv(smokeShader.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(MVP));
-	glUniformMatrix4fv(smokeShader.get_uniform_location("MV"), 1, GL_FALSE, value_ptr(V));
-	glUniformMatrix4fv(smokeShader.get_uniform_location("P"), 1, GL_FALSE, value_ptr(P));
-	
-
-	renderer::bind(textures["brick"], 0);
-	glUniform1i(smokeShader.get_uniform_location("tex"), 0);
-
-	// Bind position buffer as GL_ARRAY_BUFFER
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, G_Position_buffer);
-	// Render
-	renderer::render(cube);
-	// Tidy up
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-
-	return true;
-
+	printf("Start frame\n\r");
 	gBuffer.StartFrame();
 
+	printf("Geometry pass\n\r");
 	DSGeometryPass();
 
 	// Light passes
-	
+
+	printf("Light pass\n\r");
 	glEnable(GL_STENCIL_TEST);
 
 	for (int i = 0; i < pointLights.size(); ++i)
@@ -480,10 +465,15 @@ bool render() {
 	glDisable(GL_STENCIL_TEST);
 	
 	DSDirectionalLightPass();
-	
-	// RenderFrameOnScreen();
 
-	RenderOutline();
+	printf("Screen render\n\r");
+	RenderFrameOnScreen();
+
+
+	// RenderOutline();
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
 
   return true;
 }
@@ -498,6 +488,79 @@ void main() {
   application.set_render(render);
   // Run application
   application.run();
+}
+
+void CalculateExposure()
+{
+	// 0.5 Calculate average luminence of last frame's scene (pingpongColorBuffer[0] filled at end of loop (see last section of code))
+	if (!firstFrame)
+	{
+
+		GLuint texWidth = (int)screenSize.x, texHeight = (int)screenSize.y;
+		GLboolean change = true;
+		
+		int i = 1;
+
+		// Then pingpong between color buffers creating a smaller texture every time
+		while (texWidth > 1)
+		{
+			// first change texture 
+			texWidth = texWidth / 2;
+			texHeight = texHeight / 2;
+
+			int w, h;
+
+			renderer::bind(exposureShader);
+			
+			glBindTexture(GL_TEXTURE_2D, pingpongColorBuffer[change ? 1 : 0]);
+			glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &w);
+			glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &h);
+
+			if (w <= 0 || h <= 0)
+			{
+				printf("Texture too small");
+				return;
+			}
+
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, texWidth > 1 ? texWidth : 1, texHeight > 1 ? texHeight : 1, 0, GL_RGBA, GL_FLOAT, NULL);
+
+			glBindFramebuffer(GL_DRAW_FRAMEBUFFER, pingpongFBO[change ? 1 : 0]);
+			glDrawBuffer(GL_COLOR_ATTACHMENT0);
+			glClear(GL_COLOR_BUFFER_BIT);
+			// glViewport(0, 0, texWidth, texHeight);
+			glActiveTexture(GL_TEXTURE0);
+			glBindTexture(GL_TEXTURE_2D, pingpongColorBuffer[change ? 0 : 1]);
+			// glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, 0, 0, texWidth, texHeight, 0);
+			// glBlitNamedFramebuffer(pingpongFBO[change ? 0 : 1], pingpongFBO[change ? 1 : 0], 0, 0, texWidth * 2, texHeight * 2, 0, 0, texWidth, texHeight, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
+			glUniform1i(exposureShader.get_uniform_location("tAlbedo"), 0);
+			glUniformMatrix4fv(exposureShader.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(mat4(1.0f)));
+
+			renderer::render(screen_quad);
+
+			printf("Loop no %d", i++);
+
+			change = !change;
+		}
+
+		// Once done read the luminescence value of 1x1 texture
+		GLfloat luminescence[3];
+		glReadPixels(0, 0, 1, 1, GL_RGBA, GL_FLOAT, &luminescence);
+		GLfloat lum = 0.2126 * luminescence[0] + 0.7152 * luminescence[1] + 0.0722 * luminescence[2];
+
+		lastExposure = exposure;
+		exposure = lerp(exposure, 0.5f / lum, 0.05f); // slowly adjust exposure based on average brightness
+		
+		glBindTexture(GL_TEXTURE_2D, 0);
+		//glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+		if (abs(exposure - lastExposure) > 0.0f)
+		{
+			printf("[%f,%f,%f] - target exposure: %f", luminescence[0], luminescence[1], luminescence[2], 0.5f / lum);
+		}
+	}
+	else
+		firstFrame = false;
 }
 
 void DSGeometryPass()
@@ -563,6 +626,36 @@ void DSGeometryPass()
 		renderer::render(*m->get_mesh());
 	}
 
+
+	renderer::bind(smokeShader);
+	glEnable(GL_BLEND); 
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+	auto MVP = P * V * mat4(1.0f);
+
+	//Current isolevel uniform parameter setting
+	glUniform1f(smokeShader.get_uniform_location("isolevel"), blendValue);
+	glUniform1i(smokeShader.get_uniform_location("gMetaballCount"), MAX_PARTICLES);
+
+	// Set MV, and P matrix uniforms seperatly
+	glUniformMatrix4fv(smokeShader.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(MVP));
+	glUniformMatrix4fv(smokeShader.get_uniform_location("MV"), 1, GL_FALSE, value_ptr(V));
+	glUniformMatrix4fv(smokeShader.get_uniform_location("P"), 1, GL_FALSE, value_ptr(P));
+
+	glActiveTexture(GL_TEXTURE2);
+	//glEnable(GL_TEXTURE_2D);
+	glBindTexture(GL_TEXTURE_2D, triTableTexture);
+	renderer::bind(textures["brick"], 0);
+	glUniform1i(smokeShader.get_uniform_location("tex"), 0);
+
+	// Bind position buffer as GL_ARRAY_BUFFER
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, G_Position_buffer);
+	// Render
+	renderer::render(cube);
+	// Tidy up
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+	glDisable(GL_BLEND);
 	glDepthMask(GL_FALSE);
 }
 
@@ -609,6 +702,10 @@ void DSStencilPass(int lightIndex)
 	auto MVP = P * V * M;
 
 	renderer::bind(pointLights[lightIndex], "gPointLight");
+
+	renderer::bind(textures["CS_DATA"], 6);
+	glUniform1i(stencilPass.get_uniform_location("tCellShading"), 6);
+
 
 	glUniformMatrix4fv(stencilPass.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(MVP));
 	renderer::render(pLight);
@@ -686,21 +783,65 @@ void DSDirectionalLightPass()
 
 void RenderFrameOnScreen()
 {
+
+
 	gBuffer.BindForFinalPass();
+
+	
 
 	// glBlitFramebuffer(0, 0, screenSize.x, screenSize.y, 0, 0, screenSize.x, screenSize.y, GL_COLOR_BUFFER_BIT, GL_LINEAR);
 
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+
 	renderer::bind(deferredRendering);
 
-	glUniform1i(deferredRendering.get_uniform_location("tAlbedo"), 1);
+	renderer::bind(textures["CELL_DATA"], 6);
+
+	// Bind depth texture
+	glActiveTexture(GL_TEXTURE0);
+	glEnable(GL_TEXTURE_2D);
+	glBindTexture(GL_TEXTURE_2D, gBuffer.GetFinalTexture());
+	glActiveTexture(GL_TEXTURE1);
+	glEnable(GL_TEXTURE_2D);
+	glBindTexture(GL_TEXTURE_2D, pingpongColorBuffer[0]);
+
+	glUniform1i(deferredRendering.get_uniform_location("tAlbedo"), 0);
+	glUniform1i(deferredRendering.get_uniform_location("tPosition"), 1);
+
+	glUniform1i(deferredRendering.get_uniform_location("tCellShading"), 6);
 
 	glUniform1i(deferredRendering.get_uniform_location("depthOnly"), depthOnly);
-	glUniform1i(deferredRendering.get_uniform_location("exposure"), flatValue);
+	glUniform1i(deferredRendering.get_uniform_location("exposure"), exposure);
 	glUniformMatrix4fv(deferredRendering.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(mat4(1.0f)));
 
 	renderer::render(screen_quad);
+
+	// somewhere end of loop, store current frame's content in one of the pingpong FBO'scene (and reset buffer sizes)
+	for (GLuint i = 0; i < 2; i++)
+	{
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, pingpongFBO[i]);
+		// Reset color buffer dimensions
+		glBindTexture(GL_TEXTURE_2D, pingpongColorBuffer[i]);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, screenSize.x, screenSize.y, 0, GL_RGBA, GL_FLOAT, NULL);
+	}
+
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, pingpongFBO[0]);
+	glDrawBuffer(GL_COLOR_ATTACHMENT0);
+	glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT);
+
+	renderer::bind(exposureShader);
+
+	glActiveTexture(GL_TEXTURE0);
+	glEnable(GL_TEXTURE_2D);
+	glBindTexture(GL_TEXTURE_2D, gBuffer.GetFinalTexture());
+
+	glUniform1i(exposureShader.get_uniform_location("tAlbedo"), 0);
+	glUniformMatrix4fv(exposureShader.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(mat4(1.0f)));
+
+	// renderer::render(screen_quad);
 	
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 void RenderOutline()
@@ -751,19 +892,19 @@ void SetupLights()
 
 	// Point lights
 	pointLights[0].set_position(vec3(-15.0f, 4.0f, -15.0f));
-	pointLights[0].set_light_colour(vec4(100.0f, 50.2f, 50.3f, 1.0f));
+	pointLights[0].set_light_colour(vec4(200.0f));
 	pointLights[0].set_range(7.0f);
 
 	pointLights[1].set_position(vec3(-15.0f, 4.0f, 10.0f));
-	pointLights[1].set_light_colour(vec4(0.1f, 0.2f, 0.7f, 1.0f));
+	pointLights[1].set_light_colour(vec4(200.0f));
 	pointLights[1].set_range(5.0f + rand() % 10);
 
 	pointLights[2].set_position(vec3(5.0f, 10.0f, -7.0f));
-	pointLights[2].set_light_colour(vec4(0.3f, 1.0f, 0.3f, 1.0f));
+	pointLights[2].set_light_colour(vec4(200.0f));
 	pointLights[2].set_range(5.0f + rand() % 10);
 
 	pointLights[3].set_position(vec3(2.0f, 4.0f, 20.0f));
-	pointLights[3].set_light_colour(vec4(1.0f, 0.2f, 1.0f, 1.0f));
+	pointLights[3].set_light_colour(vec4(200.0f));
 	pointLights[3].set_range(5.0f + rand() % 10);
 
 	// Spot lights

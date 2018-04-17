@@ -4,6 +4,8 @@
 
 out VertexData
 {
+	vec4 position;
+	vec3 normal;
 	vec4 colour;
 	vec2 tex_coord;
 };
@@ -21,7 +23,6 @@ layout(points) in;
 layout(triangle_strip, max_vertices = 16) out;
 
 layout(location = 0) in float height[];
-//layout(location = 1) in vec4 force[];
 
 // Volume data field texture
 uniform sampler3D dataFieldTex;
@@ -33,8 +34,6 @@ uniform isampler2D triTableTex;
 uniform float isolevel;
 // Marching cubes vertices decal
 uniform vec3 vertDecals[8];
-// Vertices position for fragment shader
-//layout(location = 0) in vec4 position;
 
 layout(std430, binding = 0) buffer PositionBuffer { vec4 positions[]; };
 
@@ -45,18 +44,23 @@ vec3 cubePos( in int i )
 }
 
 //Get vertex i value within current marching cube
-float cubeVal( in int i )
+float cubeVal( in int i, out vec3 nor )
 {
 	float value = 0.0;
+	nor = vec3(0.0);
 	for( int j = 0; j < gMetaballCount; ++j )
 	{
 		float dist = distance( cubePos(i), positions[j].xyz );
 		value += positions[j].w * positions[j].w / ( dist * dist );
+
+		vec3 n = 2.0 * (cubePos(i)-positions[j].xyz);
+		nor += n * positions[j].w * positions[j].w / ( dist * dist * dist * dist );
 	}
 
 	// float dist = distance( cubePos(i), vec3(0.0) ); // +
 	// float dist2 = distance( cubePos(i), vec3(1.0) );
 	// return 1 / (dist2 * dist2) + 1 / (dist * dist);
+	nor = normalize(nor);
 	return value;
 }
 
@@ -76,10 +80,21 @@ vec3 vertexInterp( in float isolevel, in vec3 v0, in float l0, in vec3 v1, in fl
 void main(void) 
 {
 	float cubeVals[8];
+	vec3 cubeNormals[8];
+	normal = vec3(0.0);
 	for( int i = 0; i < 8; ++i )
 	{
-		cubeVals[i] = cubeVal(i);
+		cubeVals[i] = cubeVal(i, cubeNormals[i]);
 	}
+	
+	for( int j = 0; j < gMetaballCount; ++j )
+	{
+		float dist = distance( gl_in[0].gl_Position.xyz, positions[j].xyz );
+		vec3 n = 2.0 * (gl_in[0].gl_Position.xyz-positions[j].xyz);
+		normal += n * positions[j].w * positions[j].w / ( dist * dist * dist * dist );
+	}
+	normal = normalize(normal);
+	//		  normal = vec3(1.0, 0.0, 0.0 );
 	
 	int cubeIndex = 0;
 	//Determine the index into the edge table which tells us which vertices are inside of the surface
@@ -101,20 +116,31 @@ void main(void)
 		return;
 
 	vec3 vertlist[12];
+	vec3 vertNorms[12];
+	ivec2 vertPairs[12] = ivec2[12]( ivec2(0,1), ivec2(1,2), ivec2(2,3), ivec2(3,0), 
+									ivec2(4,5), ivec2(5,6), ivec2(6,7), ivec2(7,4),
+									ivec2(0,4), ivec2(1,5), ivec2(2,6), ivec2(3,7));
+
+	for( int i = 0; i < 12; ++i )
+	{
+		int a = vertPairs[i].x;
+		int b = vertPairs[i].y;
+		vertlist[i] = vertexInterp(isolevel, cubePos(a), cubeVals[a], cubePos(b), cubeVals[b]);
+		vertNorms[i] = vertexInterp(isolevel, cubeNormals[a], cubeVals[a], cubeNormals[b], cubeVals[b]);
+	}
 
 	//Find the vertices where the surface intersects the cube
-	vertlist[0] = vertexInterp(isolevel, cubePos(0), cubeVals[0], cubePos(1), cubeVals[1]);
-	vertlist[1] = vertexInterp(isolevel, cubePos(1), cubeVals[1], cubePos(2), cubeVals[2]);
-	vertlist[2] = vertexInterp(isolevel, cubePos(2), cubeVals[2], cubePos(3), cubeVals[3]);
-	vertlist[3] = vertexInterp(isolevel, cubePos(3), cubeVals[3], cubePos(0), cubeVals[0]);
-	vertlist[4] = vertexInterp(isolevel, cubePos(4), cubeVals[4], cubePos(5), cubeVals[5]);
-	vertlist[5] = vertexInterp(isolevel, cubePos(5), cubeVals[5], cubePos(6), cubeVals[6]);
-	vertlist[6] = vertexInterp(isolevel, cubePos(6), cubeVals[6], cubePos(7), cubeVals[7]);
-	vertlist[7] = vertexInterp(isolevel, cubePos(7), cubeVals[7], cubePos(4), cubeVals[4]);
-	vertlist[8] = vertexInterp(isolevel, cubePos(0), cubeVals[0], cubePos(4), cubeVals[4]);
-	vertlist[9] = vertexInterp(isolevel, cubePos(1), cubeVals[1], cubePos(5), cubeVals[5]);
-	vertlist[10] = vertexInterp(isolevel, cubePos(2), cubeVals[2], cubePos(6), cubeVals[6]);
-	vertlist[11] = vertexInterp(isolevel, cubePos(3), cubeVals[3], cubePos(7), cubeVals[7]);
+	//vertlist[1] = vertexInterp(isolevel, cubePos(1), cubeVals[1], cubePos(2), cubeVals[2]);
+	//vertlist[2] = vertexInterp(isolevel, cubePos(2), cubeVals[2], cubePos(3), cubeVals[3]);
+	//vertlist[3] = vertexInterp(isolevel, cubePos(3), cubeVals[3], cubePos(0), cubeVals[0]);
+	//vertlist[4] = vertexInterp(isolevel, cubePos(4), cubeVals[4], cubePos(5), cubeVals[5]);
+	//vertlist[5] = vertexInterp(isolevel, cubePos(5), cubeVals[5], cubePos(6), cubeVals[6]);
+	//vertlist[6] = vertexInterp(isolevel, cubePos(6), cubeVals[6], cubePos(7), cubeVals[7]);
+	//vertlist[7] = vertexInterp(isolevel, cubePos(7), cubeVals[7], cubePos(4), cubeVals[4]);
+	//vertlist[8] = vertexInterp(isolevel, cubePos(0), cubeVals[0], cubePos(4), cubeVals[4]);
+	//vertlist[9] = vertexInterp(isolevel, cubePos(1), cubeVals[1], cubePos(5), cubeVals[5]);
+	//vertlist[10] = vertexInterp(isolevel, cubePos(2), cubeVals[2], cubePos(6), cubeVals[6]);
+	//vertlist[11] = vertexInterp(isolevel, cubePos(3), cubeVals[3], cubePos(7), cubeVals[7]);
 
 	// Create the triangle
 	//colour = vec4(cos(isolevel*5.0-0.5), sin(isolevel*5.0-0.5), 0.5, 1.0);
@@ -140,20 +166,18 @@ void main(void)
 
 			  float height = vec4( vertlist[ triTableValue(cubeIndex, i) ], 1).y;
 
-			gl_Position = MVP * vec4( vertlist[ triTableValue(cubeIndex, i) ], 1);
-			colour = mix( vec4(0.0,0.0,0.0,1.0), vec4(1.0,0.0,0.0,1.0), height / bounds.y );
-			EmitVertex();
+			vec4 pos[3];
+			vec3 nor[3];
+			for( int j = 0; j < 3; ++j )
+			{
+				gl_Position = MVP * vec4(vertlist[triTableValue(cubeIndex, i+j)], 1);
+				position = gl_Position;
+				normal = vertNorms[triTableValue(cubeIndex, i+j)];
+				colour = mix( vec4(0.5,0.6,0.6,1.0), vec4(1.0), height / bounds.y );
+				colour.a = 0.8;
+				EmitVertex();
+			}
 
-			//Generate second vertex of triangle//
-			
-			gl_Position = MVP * vec4(vertlist[triTableValue(cubeIndex, i+1)], 1);
-			EmitVertex();
-
-			//Generate last vertex of triangle//
-			
-			gl_Position = MVP * vec4(vertlist[triTableValue(cubeIndex, i+2)], 1);
-			EmitVertex();
-			
 			//End triangle strip at firts triangle
 			EndPrimitive();
 		}

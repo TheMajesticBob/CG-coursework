@@ -7,12 +7,24 @@ uniform sampler2D tex;
 uniform sampler3D dataFieldTex;
 
 in VertexData {
-  vec4 colour;
-  vec2 tex_coord;
+	vec4 position;
+	vec3 normal;
+	vec4 colour;
+	vec2 tex_coord;
 };
 
-layout(location = 0) out vec4 colour_out;
+// They all were vec4!!
+layout(location = 0) out vec4 position_out;
+layout(location = 1) out vec4 diffuse_out;
+layout(location = 2) out vec4 normal_out;
+layout(location = 3) out vec4 mat_diffuse_out;
+layout(location = 4) out vec4 mat_specular_out;
 
-void main() { 
-	colour_out = colour; // vec4(0,0,0,1); // vec4( vec3( texture(dataFieldTex, vec3( 0, 0, 0 )).r ), 1.0 ); // vec4( vec3( texelFetch2D( triTableTex, ivec2( 1, 1 ), 0 ).r ), 1.0 );
+void main()
+{
+	diffuse_out	 = colour;
+	position_out = position;
+	normal_out	 = vec4(normal,1.0); //calc_normal(normal, tangent, binormal, normal_map, tex_coord);
+	mat_diffuse_out	 = vec4(0.7,0.7,0.7,1.0); // diffuse;
+	mat_specular_out = vec4(0.0); //specular;
 }

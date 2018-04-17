@@ -50,12 +50,18 @@ void main()
 	light_colour.a = 1.0;
 	// Calculate light dir
 	vec3 light_dir = normalize( gPointLight.position - WorldPos );
+	vec3 half_vector = normalize(light_dir + view_dir);
+
+	float intensity = max(dot(Normal, light_dir), 0);
+	float specIntensity = max(dot(Normal, half_vector), 0);
 
 	// Now use standard phong shading but using calculated light colour and direction
 	// - note no ambient
-	vec4 diffuse = (vec4(Diffuse.rgb,1.0) * light_colour) * max(dot(Normal, light_dir), 0);
-	vec3 half_vector = normalize(light_dir + view_dir);
-	vec4 specular = (Specular * light_colour) * pow(max(dot(Normal, half_vector), 0), Diffuse.a);
+	vec4 diffuse = (vec4(Diffuse.rgb,1.0) * light_colour) * intensity;
+	vec4 specular = (Specular * light_colour) * pow(specIntensity, Diffuse.a);
 	colour = diffuse * Color + specular;
+
+	float gamma = 2.2;
+	vec4 greyscale = vec4(0.2989, 0.5870, 0.1140, 1.0) * colour;
 	colour.a = 1.0;
 }
