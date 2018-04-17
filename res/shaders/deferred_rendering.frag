@@ -28,7 +28,7 @@ void main()
     vec3 mapped = vec3(1.0) - exp(-hdrColor * exposure);
 
     // gamma correction 
-    mapped = pow(mapped, vec3(1.0 / gamma));
+    vec3 gammaCorrected = pow(mapped, vec3(1.0 / gamma));
   
 	if( depthOnly == 1 )
 	{
@@ -36,6 +36,6 @@ void main()
 	}
 	else 
 	{
-		colour = vec4(mapped, 1.0); // * texture(tCellShading, length(mapped));
+		colour = vec4(gammaCorrected, 1.0) * texture(tCellShading, clamp( length(mapped), 0.0, 1.0 ));
 	}
 }

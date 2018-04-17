@@ -6,6 +6,7 @@
 #include "Player.h"
 #include "GBuffer.h"
 #include "MarchingCubes.h"
+#include "ParticleSystem.h"
 
 using namespace std;
 using namespace std::chrono;
@@ -46,20 +47,15 @@ GLuint triTableTexture;
 geometry cube;
 vec3 cubeSize = vec3(8.0f, 24.0f, 16.0f);
 vec3 cubeStep = vec3(1.0f / RESOLUTION);
-arc_ball_camera cam;
 
 // Lights
 mesh pLight;
 vector<point_light> pointLights(4);
-vector<spot_light> spotLights(2);
 directional_light ambientLight;
 
 // Textures
 map<string, texture> textures;
 map<string, texture> normals;
-
-// Etc
-shadow_map shadow;
 
 Player* player;
 chase_camera playerCamera;
@@ -133,7 +129,6 @@ bool load_content() {
 	screen_quad.add_buffer(tex_coords, BUFFER_INDEXES::TEXTURE_COORDS_0);
 	screen_quad.set_type(GL_TRIANGLE_STRIP);
 
-	shadow = shadow_map(screenSize.x, screenSize.y);
 
 	// Load up textures
 	textures["empty"] = texture("res/textures/empty_texture.png");
@@ -142,10 +137,15 @@ bool load_content() {
 	textures["metal"] = texture("res/textures/metal.png");
 
 	// Colour scale from red to black
-	vector<vec4> colour_data{ vec4(0.12f, 0.12f, 0.12f, 1.0f), vec4(0.12f, 0.12f, 0.12f, 1.0f),vec4(0.12f, 0.12f, 0.12f, 1.0f),vec4(0.12f, 0.12f, 0.12f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f),
-		vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f) };
+	vector<vec4> colour_data{ vec4(0.12f, 0.12f, 0.12f, 1.0f),
+		// vec4(0.12f, 0.12f, 0.12f, 1.0f),vec4(0.12f, 0.12f, 0.12f, 1.0f),vec4(0.12f, 0.12f, 0.12f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), 
+		vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f),
+		//vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f),
+		vec4(1.0f, 1.0f, 1.0f, 1.0f),
+		// vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f) };
+	};
 	// Create 1D 4x1 texture from colour_data
-	textures["CS_DATA"] = texture(colour_data, 4, 1, false, false);
+	textures["CS_DATA"] = texture(colour_data, colour_data.size(), 1, false, false);
 
 	normals["empty"] = texture("res/textures/normals/empty_normal.png");
 	normals["dirt"] = texture("res/textures/normals/dirt_normal.jpg");
@@ -206,34 +206,9 @@ bool load_content() {
 		smokeVelocitys[i] = vec4(0.0f, 0.4f + (2.0f * dist(rand)), 0.0f, 0.0f);
 	}
 
-	// a useless vao, but we need it bound or we get errors.
-	glGenVertexArrays(1, &vao);
-	glBindVertexArray(vao);
-	// *********************************
-	//Generate Position Data buffer
-	glGenBuffers(1, &G_Position_buffer);
-	// Bind as GL_SHADER_STORAGE_BUFFER
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, G_Position_buffer);
-	// Send Data to GPU, use GL_DYNAMIC_DRAW
-	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(vec4) * MAX_PARTICLES, smokePositions, GL_DYNAMIC_DRAW);
-
-	// Generate Velocity Data buffer
-	glGenBuffers(1, &G_Velocity_buffer);
-	// Bind as GL_SHADER_STORAGE_BUFFER
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, G_Velocity_buffer);
-	// Send Data to GPU, use GL_DYNAMIC_DRAW
-	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(vec4) * MAX_PARTICLES, smokeVelocitys, GL_DYNAMIC_DRAW);
-
-	// *********************************
-	//Unbind
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+	
 
 	// Smoke
-
-	// Set camera properties
-	cam.set_position(vec3(0.0f, 10.0f, 10.0f));
-	cam.set_target(vec3(0.0f, 0.0f, 0.0f));
-	cam.set_projection(quarter_pi<float>(), renderer::get_screen_aspect(), 0.1f, 1000.0f);
 
 	smokeShader.add_shader("res/shaders/smoke.vert", GL_VERTEX_SHADER);
 	smokeShader.add_shader("res/shaders/smoke.geom", GL_GEOMETRY_SHADER);
@@ -256,9 +231,6 @@ bool load_content() {
 	// Add to the geometry
 	cube.add_buffer(pos, BUFFER_INDEXES::POSITION_BUFFER);
 	cube.set_type(GL_POINTS);
-
-	GLuint edgeTableTexture;
-	GLuint dataTexture;
 
 	GLuint program = smokeShader.get_program();
 
@@ -307,38 +279,6 @@ bool load_content() {
 	glUseProgramObjectARB(0);
 	// End Smoke
 
-	glGenFramebuffers(2, pingpongFBO);
-	glGenTextures(2, pingpongColorBuffer);
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, pingpongFBO[0]);
-
-	glBindTexture(GL_TEXTURE_2D, pingpongColorBuffer[0]);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, screenSize.x, screenSize.y, 0, GL_RGBA, GL_FLOAT, NULL);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, pingpongColorBuffer[0], 0);
-	GLenum Status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-
-	if (Status != GL_FRAMEBUFFER_COMPLETE) {
-		printf("FB error, status: 0x%x\n", Status);
-		return false;
-	}
-
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, pingpongFBO[1]);
-	glBindTexture(GL_TEXTURE_2D, pingpongColorBuffer[1]);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, screenSize.x, screenSize.y, 0, GL_RGB, GL_FLOAT, NULL);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, pingpongColorBuffer[1], 0);
-	Status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-
-	if (Status != GL_FRAMEBUFFER_COMPLETE) {
-		printf("FB error, status: 0x%x\n", Status);
-		return false;
-	}
 
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 
@@ -426,7 +366,7 @@ bool update(float delta_time) {
 }
 
 bool render() {
-	CalculateExposure();
+	// CalculateExposure();
 
 	// Bind Compute Shader
 	renderer::bind(computeShader);
@@ -458,10 +398,9 @@ bool render() {
 	
 	DSDirectionalLightPass();
 
-	RenderFrameOnScreen();
+	// RenderFrameOnScreen();
 
-
-	// RenderOutline();
+	RenderOutline();
 
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
   return true;
@@ -603,6 +542,7 @@ void DSGeometryPass()
 	renderer::bind(smokeShader);
 	glEnable(GL_BLEND); 
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glDepthMask(GL_FALSE);
 
 	auto MVP = P * V * mat4(1.0f);
 
@@ -756,29 +696,6 @@ void DSDirectionalLightPass()
 
 void RenderFrameOnScreen()
 {
-	gBuffer.BindForFinalPass();
-
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-
-	renderer::bind(deferredRendering);
-
-	renderer::bind(textures["CELL_DATA"], 6);
-
-	// Bind depth texture
-	glActiveTexture(GL_TEXTURE0);
-	glEnable(GL_TEXTURE_2D);
-	glBindTexture(GL_TEXTURE_2D, gBuffer.GetFinalTexture());
-
-	glUniform1i(deferredRendering.get_uniform_location("tAlbedo"), 0);
-
-	glUniform1i(deferredRendering.get_uniform_location("tCellShading"), 6);
-
-	glUniform1i(deferredRendering.get_uniform_location("depthOnly"), depthOnly);
-	glUniform1f(deferredRendering.get_uniform_location("exposure"), exposure);
-	glUniformMatrix4fv(deferredRendering.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(mat4(1.0f)));
-
-	renderer::render(screen_quad);
-
 	// somewhere end of loop, store current frame's content in one of the pingpong FBO'scene (and reset buffer sizes)
 	for (GLuint i = 0; i < 2; i++)
 	{
@@ -803,8 +720,30 @@ void RenderFrameOnScreen()
 	glUniformMatrix4fv(exposureShader.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(mat4(1.0f)));
 
 	renderer::render(screen_quad);
-	
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+
+	gBuffer.BindForFinalPass();
+
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, frame.get_buffer());
+
+	renderer::bind(deferredRendering);
+
+	renderer::bind(textures["CELL_DATA"], 6);
+
+	// Bind depth texture
+	glActiveTexture(GL_TEXTURE0);
+	glEnable(GL_TEXTURE_2D);
+	glBindTexture(GL_TEXTURE_2D, gBuffer.GetFinalTexture());
+
+	glUniform1i(deferredRendering.get_uniform_location("tAlbedo"), 0);
+
+	glUniform1i(deferredRendering.get_uniform_location("tCellShading"), 6);
+
+	glUniform1i(deferredRendering.get_uniform_location("depthOnly"), depthOnly);
+	glUniform1f(deferredRendering.get_uniform_location("exposure"), exposure);
+	glUniformMatrix4fv(deferredRendering.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(mat4(1.0f)));
+
+	renderer::render(screen_quad);
 }
 
 void RenderOutline()
@@ -819,14 +758,15 @@ void RenderOutline()
 	glActiveTexture(GL_TEXTURE0);
 	glEnable(GL_TEXTURE_2D);
 	glBindTexture(GL_TEXTURE_2D, gBuffer.GetFinalTexture());
-
-	glUniform1i(outline.get_uniform_location("tAlbedo"), 0);
-	glUniform1i(outline.get_uniform_location("tNormals"), 2);
-
 	// Bind depth texture
 	glActiveTexture(GL_TEXTURE3);
 	glEnable(GL_TEXTURE_2D);
 	glBindTexture(GL_TEXTURE_2D, gBuffer.GetDepthTexture());
+
+	// Set the tex uniform
+	glUniform1i(outline.get_uniform_location("tAlbedo"), 0);
+	glUniform1i(outline.get_uniform_location("tNormals"), 2);
+	glUniform1i(deferredRendering.get_uniform_location("tCellShading"), 6);
 	// Set the tex uniform
 	glUniform1i(outline.get_uniform_location("depth"), 1);
 	// Set the screen_size uniform
@@ -855,19 +795,19 @@ void SetupLights()
 
 	// Point lights
 	pointLights[0].set_position(vec3(-15.0f, 4.0f, -15.0f));
-	pointLights[0].set_light_colour(vec4(200.0f));
+	pointLights[0].set_light_colour(vec4(50.0f));
 	pointLights[0].set_range(7.0f);
 
 	pointLights[1].set_position(vec3(-15.0f, 4.0f, 10.0f));
-	pointLights[1].set_light_colour(vec4(200.0f));
+	pointLights[1].set_light_colour(vec4(100.0f));
 	pointLights[1].set_range(5.0f + rand() % 10);
 
 	pointLights[2].set_position(vec3(5.0f, 10.0f, -7.0f));
-	pointLights[2].set_light_colour(vec4(200.0f));
+	pointLights[2].set_light_colour(vec4(20.0f));
 	pointLights[2].set_range(5.0f + rand() % 10);
 
 	pointLights[3].set_position(vec3(2.0f, 4.0f, 20.0f));
-	pointLights[3].set_light_colour(vec4(200.0f));
+	pointLights[3].set_light_colour(vec4(90.0f));
 	pointLights[3].set_range(5.0f + rand() % 10);
 
 	// Spot lights
