@@ -25,18 +25,17 @@ void main()
   
     // reinhard tone mapping
     //vec3 mapped = hdrColor / (hdrColor + vec3(1.0));
-     vec3 mapped = vec3(1.0) - exp(-hdrColor * exposure);
+    vec3 mapped = vec3(1.0) - exp(-hdrColor * exposure);
 
     // gamma correction 
     mapped = pow(mapped, vec3(1.0 / gamma));
   
-  if( depthOnly == 1 )
-  {
-	colour = texture2D(tPosition, tex_coord);
+	if( depthOnly == 1 )
+	{
+		colour = image;
 	}
 	else 
 	{
-	colour = image;
+		colour = vec4(mapped, 1.0); // * texture(tCellShading, length(mapped));
 	}
-	colour = vec4(mapped, 1.0); // * texture(tCellShading, length(mapped));
 }

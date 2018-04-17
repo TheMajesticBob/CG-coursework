@@ -74,7 +74,8 @@ geometry screen_quad;
 bool firstFrame = true;
 GLuint pingpongColorBuffer[2];
 GLuint pingpongFBO[2];
-float exposure, lastExposure;
+float exposure = 1.0f;
+float lastExposure = 1.0f;
 effect exposureShader;
 
 // Input vars
@@ -120,8 +121,6 @@ bool initialise() {
 }
 
 bool load_content() {
-	lastExposure = exposure = 1.0f;
-
 	screenSize = vec2( renderer::get_screen_width(), renderer::get_screen_height() );
 
 	// Create frame buffer - use screen width and height
@@ -328,7 +327,7 @@ bool load_content() {
 
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, pingpongFBO[1]);
 	glBindTexture(GL_TEXTURE_2D, pingpongColorBuffer[1]);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, screenSize.x, screenSize.y, 0, GL_RGBA, GL_FLOAT, NULL);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, screenSize.x, screenSize.y, 0, GL_RGB, GL_FLOAT, NULL);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -427,7 +426,6 @@ bool update(float delta_time) {
 }
 
 bool render() {
-
 	CalculateExposure();
 
 	// Bind Compute Shader
@@ -442,17 +440,11 @@ bool render() {
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 1);
 
-	// return true;
-
-	printf("Start frame\n\r");
 	gBuffer.StartFrame();
 
-	printf("Geometry pass\n\r");
 	DSGeometryPass();
 
 	// Light passes
-
-	printf("Light pass\n\r");
 	glEnable(GL_STENCIL_TEST);
 
 	for (int i = 0; i < pointLights.size(); ++i)
@@ -466,15 +458,12 @@ bool render() {
 	
 	DSDirectionalLightPass();
 
-	printf("Screen render\n\r");
 	RenderFrameOnScreen();
 
 
 	// RenderOutline();
 
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-
   return true;
 }
 
@@ -495,10 +484,9 @@ void CalculateExposure()
 	// 0.5 Calculate average luminence of last frame's scene (pingpongColorBuffer[0] filled at end of loop (see last section of code))
 	if (!firstFrame)
 	{
-
 		GLuint texWidth = (int)screenSize.x, texHeight = (int)screenSize.y;
 		GLboolean change = true;
-		
+
 		int i = 1;
 
 		// Then pingpong between color buffers creating a smaller texture every time
@@ -508,21 +496,10 @@ void CalculateExposure()
 			texWidth = texWidth / 2;
 			texHeight = texHeight / 2;
 
-			int w, h;
-
 			renderer::bind(exposureShader);
-			
+
 			glBindTexture(GL_TEXTURE_2D, pingpongColorBuffer[change ? 1 : 0]);
-			glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &w);
-			glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &h);
-
-			if (w <= 0 || h <= 0)
-			{
-				printf("Texture too small");
-				return;
-			}
-
-			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, texWidth > 1 ? texWidth : 1, texHeight > 1 ? texHeight : 1, 0, GL_RGBA, GL_FLOAT, NULL);
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, texWidth > 1 ? texWidth : 1, texHeight > 1 ? texHeight : 1, 0, GL_RGB, GL_FLOAT, NULL);
 
 			glBindFramebuffer(GL_DRAW_FRAMEBUFFER, pingpongFBO[change ? 1 : 0]);
 			glDrawBuffer(GL_COLOR_ATTACHMENT0);
@@ -530,37 +507,33 @@ void CalculateExposure()
 			// glViewport(0, 0, texWidth, texHeight);
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, pingpongColorBuffer[change ? 0 : 1]);
-			// glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, 0, 0, texWidth, texHeight, 0);
-			// glBlitNamedFramebuffer(pingpongFBO[change ? 0 : 1], pingpongFBO[change ? 1 : 0], 0, 0, texWidth * 2, texHeight * 2, 0, 0, texWidth, texHeight, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
 			glUniform1i(exposureShader.get_uniform_location("tAlbedo"), 0);
 			glUniformMatrix4fv(exposureShader.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(mat4(1.0f)));
 
 			renderer::render(screen_quad);
 
-			printf("Loop no %d", i++);
-
 			change = !change;
 		}
 
 		// Once done read the luminescence value of 1x1 texture
-		GLfloat luminescence[3];
-		glReadPixels(0, 0, 1, 1, GL_RGBA, GL_FLOAT, &luminescence);
-		GLfloat lum = 0.2126 * luminescence[0] + 0.7152 * luminescence[1] + 0.0722 * luminescence[2];
+		float luminescence[3];
+		glReadPixels(0, 0, 1, 1, GL_RGB, GL_FLOAT, &luminescence);
+		float lum = 0.2126f * luminescence[0] + 0.7152f * luminescence[1] + 0.0722f * luminescence[2];
+		if (lum <= 0.0f)
+			lum = 0.001f;
 
-		lastExposure = exposure;
 		exposure = lerp(exposure, 0.5f / lum, 0.05f); // slowly adjust exposure based on average brightness
-		
-		glBindTexture(GL_TEXTURE_2D, 0);
-		//glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-		if (abs(exposure - lastExposure) > 0.0f)
-		{
-			printf("[%f,%f,%f] - target exposure: %f", luminescence[0], luminescence[1], luminescence[2], 0.5f / lum);
-		}
+		glBindTexture(GL_TEXTURE_2D, 0);
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	}
 	else
+	{
+		exposure = 1.0f;
+		lastExposure = exposure;
 		firstFrame = false;
+	}
 }
 
 void DSGeometryPass()
@@ -783,13 +756,7 @@ void DSDirectionalLightPass()
 
 void RenderFrameOnScreen()
 {
-
-
 	gBuffer.BindForFinalPass();
-
-	
-
-	// glBlitFramebuffer(0, 0, screenSize.x, screenSize.y, 0, 0, screenSize.x, screenSize.y, GL_COLOR_BUFFER_BIT, GL_LINEAR);
 
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 
@@ -801,17 +768,13 @@ void RenderFrameOnScreen()
 	glActiveTexture(GL_TEXTURE0);
 	glEnable(GL_TEXTURE_2D);
 	glBindTexture(GL_TEXTURE_2D, gBuffer.GetFinalTexture());
-	glActiveTexture(GL_TEXTURE1);
-	glEnable(GL_TEXTURE_2D);
-	glBindTexture(GL_TEXTURE_2D, pingpongColorBuffer[0]);
 
 	glUniform1i(deferredRendering.get_uniform_location("tAlbedo"), 0);
-	glUniform1i(deferredRendering.get_uniform_location("tPosition"), 1);
 
 	glUniform1i(deferredRendering.get_uniform_location("tCellShading"), 6);
 
 	glUniform1i(deferredRendering.get_uniform_location("depthOnly"), depthOnly);
-	glUniform1i(deferredRendering.get_uniform_location("exposure"), exposure);
+	glUniform1f(deferredRendering.get_uniform_location("exposure"), exposure);
 	glUniformMatrix4fv(deferredRendering.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(mat4(1.0f)));
 
 	renderer::render(screen_quad);
@@ -822,7 +785,7 @@ void RenderFrameOnScreen()
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, pingpongFBO[i]);
 		// Reset color buffer dimensions
 		glBindTexture(GL_TEXTURE_2D, pingpongColorBuffer[i]);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, screenSize.x, screenSize.y, 0, GL_RGBA, GL_FLOAT, NULL);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, screenSize.x, screenSize.y, 0, GL_RGB, GL_FLOAT, NULL);
 	}
 
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, pingpongFBO[0]);
@@ -839,7 +802,7 @@ void RenderFrameOnScreen()
 	glUniform1i(exposureShader.get_uniform_location("tAlbedo"), 0);
 	glUniformMatrix4fv(exposureShader.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(mat4(1.0f)));
 
-	// renderer::render(screen_quad);
+	renderer::render(screen_quad);
 	
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
