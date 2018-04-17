@@ -12,8 +12,6 @@ out VertexData
 
 // MVP matrix
 uniform mat4 MVP;
-uniform mat4 MV;
-uniform mat4 P;
 
 uniform vec3 bounds;
 
@@ -24,10 +22,6 @@ layout(triangle_strip, max_vertices = 16) out;
 
 layout(location = 0) in float height[];
 
-// Volume data field texture
-uniform sampler3D dataFieldTex;
-// Edge table texture
-uniform isampler2D edgeTableTex;
 // Triangles table texture
 uniform isampler2D triTableTex;
 // Global iso level
@@ -57,9 +51,6 @@ float cubeVal( in int i, out vec3 nor )
 		nor += n * positions[j].w * positions[j].w / ( dist * dist * dist * dist );
 	}
 
-	// float dist = distance( cubePos(i), vec3(0.0) ); // +
-	// float dist2 = distance( cubePos(i), vec3(1.0) );
-	// return 1 / (dist2 * dist2) + 1 / (dist * dist);
 	nor = normalize(nor);
 	return value;
 }
@@ -78,23 +69,14 @@ vec3 vertexInterp( in float isolevel, in vec3 v0, in float l0, in vec3 v1, in fl
 
 //Geometry Shader entry point
 void main(void) 
-{
+{  
 	float cubeVals[8];
 	vec3 cubeNormals[8];
-	normal = vec3(0.0);
+
 	for( int i = 0; i < 8; ++i )
 	{
 		cubeVals[i] = cubeVal(i, cubeNormals[i]);
 	}
-	
-	for( int j = 0; j < gMetaballCount; ++j )
-	{
-		float dist = distance( gl_in[0].gl_Position.xyz, positions[j].xyz );
-		vec3 n = 2.0 * (gl_in[0].gl_Position.xyz-positions[j].xyz);
-		normal += n * positions[j].w * positions[j].w / ( dist * dist * dist * dist );
-	}
-	normal = normalize(normal);
-	//		  normal = vec3(1.0, 0.0, 0.0 );
 	
 	int cubeIndex = 0;
 	//Determine the index into the edge table which tells us which vertices are inside of the surface
@@ -121,6 +103,7 @@ void main(void)
 									ivec2(4,5), ivec2(5,6), ivec2(6,7), ivec2(7,4),
 									ivec2(0,4), ivec2(1,5), ivec2(2,6), ivec2(3,7));
 
+	//Find the vertices where the surface intersects the cube
 	for( int i = 0; i < 12; ++i )
 	{
 		int a = vertPairs[i].x;
@@ -129,21 +112,6 @@ void main(void)
 		vertNorms[i] = vertexInterp(isolevel, cubeNormals[a], cubeVals[a], cubeNormals[b], cubeVals[b]);
 	}
 
-	//Find the vertices where the surface intersects the cube
-	//vertlist[1] = vertexInterp(isolevel, cubePos(1), cubeVals[1], cubePos(2), cubeVals[2]);
-	//vertlist[2] = vertexInterp(isolevel, cubePos(2), cubeVals[2], cubePos(3), cubeVals[3]);
-	//vertlist[3] = vertexInterp(isolevel, cubePos(3), cubeVals[3], cubePos(0), cubeVals[0]);
-	//vertlist[4] = vertexInterp(isolevel, cubePos(4), cubeVals[4], cubePos(5), cubeVals[5]);
-	//vertlist[5] = vertexInterp(isolevel, cubePos(5), cubeVals[5], cubePos(6), cubeVals[6]);
-	//vertlist[6] = vertexInterp(isolevel, cubePos(6), cubeVals[6], cubePos(7), cubeVals[7]);
-	//vertlist[7] = vertexInterp(isolevel, cubePos(7), cubeVals[7], cubePos(4), cubeVals[4]);
-	//vertlist[8] = vertexInterp(isolevel, cubePos(0), cubeVals[0], cubePos(4), cubeVals[4]);
-	//vertlist[9] = vertexInterp(isolevel, cubePos(1), cubeVals[1], cubePos(5), cubeVals[5]);
-	//vertlist[10] = vertexInterp(isolevel, cubePos(2), cubeVals[2], cubePos(6), cubeVals[6]);
-	//vertlist[11] = vertexInterp(isolevel, cubePos(3), cubeVals[3], cubePos(7), cubeVals[7]);
-
-	// Create the triangle
-	//colour = vec4(cos(isolevel*5.0-0.5), sin(isolevel*5.0-0.5), 0.5, 1.0);
 
 	int i=0;
 	// Strange bug with this way, uncomment to test
@@ -178,7 +146,7 @@ void main(void)
 				EmitVertex();
 			}
 
-			//End triangle strip at firts triangle
+			//End triangle strip at first triangle
 			EndPrimitive();
 		}
 		else
@@ -188,4 +156,3 @@ void main(void)
 		//i = i + 3; //Comment it for testing the strange bug
 	}
 }
-//*/

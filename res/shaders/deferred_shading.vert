@@ -31,7 +31,7 @@ layout (location = 0) out vec4 vertex_position;
 // Outgoing texture coordinate
 layout (location = 1) out vec2 tex_coord_out;
 // Outgoing transformed normal
-layout (location = 2) out vec3 transformed_normal;
+layout (location = 2) out vec4 transformed_normal;
 // Outgoing tangent
 layout (location = 3) out vec3 tangent_out;
 // Outgoing binormal
@@ -47,7 +47,7 @@ void main( void )
 	vertex_position = M * vec4( position, 1.0 );
 
 	// Transform normal
-	transformed_normal = N * normal;
+	transformed_normal = vec4( N * normal, mat.shininess);
 	// Transform tangent
 	tangent_out = N * tangent;
 	// Transform binormal
@@ -55,6 +55,6 @@ void main( void )
 
 	tex_coord_out = tex_coord_in;
 
-	diffuse_out = vec4(mat.diffuse_reflection.rgb, mat.shininess);
+	diffuse_out = mat.diffuse_reflection;
 	specular_out = mat.specular_reflection;
 }

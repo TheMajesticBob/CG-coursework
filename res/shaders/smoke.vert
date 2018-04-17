@@ -1,9 +1,5 @@
 #version 440 core
 
-// Model matrix
-uniform mat4 MV;
-
-uniform vec4[20] gMetaballs;
 uniform int gMetaballCount;
 
 layout(location = 0) in vec3 position;

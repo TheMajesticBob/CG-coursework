@@ -1,9 +1,10 @@
 #version 430 core
 
 // Incoming texture containing frame information
+uniform sampler2D tPosition;
 uniform sampler2D tAlbedo;
 uniform sampler2D tNormals;
-uniform sampler2D depth;
+uniform sampler2D tDepth;
 
 uniform vec4 outline_colour;
 uniform vec2 screen_size;
@@ -43,15 +44,15 @@ void main() {
 					vec2( 0.0, -blockSize.g ) + tex_coord);
 
 	// Sample main depth texture
-	vec4 mainDepth = texture(depth, tex_coord) / 4.0;
+	vec4 mainDepth = texture(tDepth, tex_coord) / 4.0;
 	vec4 mainNormal = texture(tNormals, tex_coord);
 
 	// Sample depth texture with offset UVs and subtract them from main depth
 	vec4[4] depths = vec4[](
-					mainDepth - texture(depth, uvs[0]),
-					mainDepth - texture(depth, uvs[1]),
-					mainDepth - texture(depth, uvs[2]),
-					mainDepth - texture(depth, uvs[3]));
+					mainDepth - texture(tDepth, uvs[0]),
+					mainDepth - texture(tDepth, uvs[1]),
+					mainDepth - texture(tDepth, uvs[2]),
+					mainDepth - texture(tDepth, uvs[3]));
 
 	vec4[4] normals = vec4[](
 					mainNormal - texture(tNormals, uvs[0]),
@@ -72,14 +73,15 @@ void main() {
 
 	vec4 edgeDepth = clamp( max(depthSum*2.0,normalSum) / flattening_value, 0.0, 1.0 ) * blend_value;
 
-	float outlineValue = clamp( pow(length(edgeDepth), 2.0), 0.0, 1.0 );
+	float outlineValue = -log( 1-clamp( pow(length(edgeDepth), 2.0), 0.0, 1.0 ) );
 
 	if( depth_only == 1 )
 	{
 		colour = vec4( vec3( outlineValue ), 1.0 );
 	} else if( depth_only == 2 )
 	{
-		colour = mainNormal;
+		colour = vec4(mainDepth.r*2.0);
+		colour.a = 1.0;
 	} else {
 		colour = mix( texture( tAlbedo, tex_coord ), outline_colour, outlineValue );
 		colour.a = 1.0;

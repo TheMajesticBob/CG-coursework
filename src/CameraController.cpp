@@ -21,7 +21,7 @@ void CameraController::Initialize()
 	freeCam->set_target(vec3(0.0f, 0.0f, 0.0f));
 	
 	// Set active camera number to 0
-	activeCamera = 0;
+	SetCamera(0);
 
 	// Bind camera switching functions to proper keys
 	InputHandler::BindKey('1', GLFW_PRESS, KeyDelegate::from_function<CameraController, &CameraController::PreviousCamera>(this));
@@ -31,6 +31,12 @@ void CameraController::Initialize()
 	InputHandler::BindAxis('S', -1.0f, AxisDelegate::from_function<CameraController, &CameraController::MoveForward>(this));
 	InputHandler::BindAxis('A', -1.0f, AxisDelegate::from_function<CameraController, &CameraController::MoveRight>(this));
 	InputHandler::BindAxis('D', 1.0f, AxisDelegate::from_function<CameraController, &CameraController::MoveRight>(this));
+}
+
+void CameraController::SetCamera(int id)
+{
+	activeCamera = id;
+	UpdateCameraMatrices(cameras[id]);
 }
 
 camera* CameraController::GetActiveCamera()
@@ -43,12 +49,33 @@ camera* CameraController::GetCameraByName(string name)
 	return _cameras[name];
 }
 
+mat4 CameraController::GetCurrentViewMatrix()
+{
+	return currentV;
+}
+
+mat4 CameraController::GetCurrentProjectionMatrix()
+{
+	return currentP;
+}
+
+void CameraController::UpdateCameraMatrices(camera* cam)
+{
+	cam->update(0.0f);
+
+	currentV = cam->get_view();
+	currentP = cam->get_projection();
+	currentVP = currentP * currentV;
+}
+
 void CameraController::NextCamera()
 {
 	if (++activeCamera >= cameras.size())
 	{
 		activeCamera = 0;
 	}
+
+	UpdateCameraMatrices(cameras[activeCamera]);
 }
 
 void CameraController::PreviousCamera()
@@ -57,18 +84,26 @@ void CameraController::PreviousCamera()
 	{
 		activeCamera = cameras.size() - 1;
 	}
+
+	UpdateCameraMatrices(cameras[activeCamera]);
 }
 
 void CameraController::MoveForward(float value)
 {
-	if( GetActiveCamera() == freeCam )
+	if (GetActiveCamera() == freeCam)
+	{
 		freeCam->move(vec3(0.0f, 0.0f, value) * cameraMovementSpeed * InputHandler::DeltaTime);
+		UpdateCameraMatrices(freeCam);
+	}
 }
 
 void CameraController::MoveRight(float value)
 {
 	if (GetActiveCamera() == freeCam)
+	{
 		freeCam->move(vec3(value, 0.0f, 0.0f) * cameraMovementSpeed * InputHandler::DeltaTime);
+		UpdateCameraMatrices(freeCam);
+	}
 }
 
 void CameraController::HandleFreeCameraRotation()
@@ -87,6 +122,10 @@ void CameraController::HandleFreeCameraRotation()
 	// delta_y - x-axis rotation
 	// delta_x - y-axis rotation
 	freeCam->rotate(delta_x, -delta_y);
+	if (delta_x != 0.0f || delta_y != 0.0f)
+	{
+		UpdateCameraMatrices(freeCam);
+	}
 }
 
 double CameraController::GetMouseSensitivity()
@@ -109,6 +148,11 @@ void CameraController::AddNewCamera(string name, camera * cam)
 
 	_cameras[name] = cam;
 	cameras.emplace(cameras.end(), cam);
+}
+
+mat4 CameraController::GetCurrentVPMatrix()
+{
+	return currentVP;
 }
 
 target_camera* CameraController::CreateTargetCamera(string name)

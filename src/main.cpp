@@ -1,11 +1,9 @@
 #include <glm\glm.hpp>
 #include <graphics_framework.h>
 #include "InputHandler.h"
-#include "CameraController.h"
 #include "RenderedObject.h"
 #include "Player.h"
 #include "GBuffer.h"
-#include "MarchingCubes.h"
 #include "ParticleSystem.h"
 
 using namespace std;
@@ -13,14 +11,10 @@ using namespace std::chrono;
 using namespace graphics_framework;
 using namespace glm;
 
-extern int edgeTable[256];
-extern int triTable[256][16];
-
 // Geometry
 map<string, RenderedObject*> gameObjects;
 
 // Shaders
-effect specular;
 effect outline;
 
 effect stencilPass;
@@ -29,24 +23,6 @@ effect pointLightPass;
 
 effect deferredShading;
 effect deferredRendering;
-
-// Smoke vars
-effect computeShader;
-effect smokeShader;
-GLuint vao;
-
-const unsigned int MAX_PARTICLES = 24;
-const float RESOLUTION = 4;
-const float CUBE_SIZE = 8.0f;
-
-vec4 smokePositions[MAX_PARTICLES];
-vec4 smokeVelocitys[MAX_PARTICLES];
-GLuint G_Position_buffer, G_Velocity_buffer;
-GLuint triTableTexture;
-
-geometry cube;
-vec3 cubeSize = vec3(8.0f, 24.0f, 16.0f);
-vec3 cubeStep = vec3(1.0f / RESOLUTION);
 
 // Lights
 mesh pLight;
@@ -60,34 +36,27 @@ map<string, texture> normals;
 Player* player;
 chase_camera playerCamera;
 CameraController camController;
+ParticleSystem smokePS;
 
 // Post-process
 vec2 screenSize;
 frame_buffer frame;
 geometry screen_quad;
 
-// HDR + BLOOM
-bool firstFrame = true;
-GLuint pingpongColorBuffer[2];
-GLuint pingpongFBO[2];
-float exposure = 1.0f;
-float lastExposure = 1.0f;
-effect exposureShader;
-
 // Input vars
-double mouse_x = 0.0, mouse_y = 0.0;
-float flatValue = 1.0f;
-float blendValue = 0.5f; // 100.0f;
+float flatValue = 0.88f;
+float blendValue = 0.88f; // 100.0f;
 
 void SetupLights();
 void SetupGeometry();
 
-void CalculateExposure();
-
+// Deferred shading methods
 void DSGeometryPass();
 void DSPointLightPass(int lightIndex);
 void DSStencilPass(int lightIndex);
 void DSDirectionalLightPass();
+
+// Post-process methods
 void RenderFrameOnScreen();
 void RenderOutline();
 
@@ -96,15 +65,12 @@ float CalcPointLightSphere(point_light light);
 int depthOnly = 0;
 
 // Deferred render vars
-GBuffer gBuffer; // unsigned int gBuffer
-unsigned int gPosition, gNormal, gAlbedo, gDepth;
-unsigned int gPositionTexture, gNormalTexture, gAlbedoTexture, gDepthTexture;
+GBuffer gBuffer;
+GLuint outlineTexture, outlineBuffer;
 
 bool initialise() {
 	// Set input mode - hide the cursor
 	glfwSetInputMode(renderer::get_window(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-	// Capture initial mouse position
-	glfwGetCursorPos(renderer::get_window(), &mouse_x, &mouse_y);
 
 	// Set custom input callbacks
 	glfwSetInputMode(renderer::get_window(), GLFW_STICKY_KEYS, GLFW_TRUE);
@@ -119,8 +85,6 @@ bool initialise() {
 bool load_content() {
 	screenSize = vec2( renderer::get_screen_width(), renderer::get_screen_height() );
 
-	// Create frame buffer - use screen width and height
-	frame = frame_buffer(screenSize.x, screenSize.y);
 	// Create screen quad
 	vector<vec3> positions{ vec3(-1.0f, -1.0f, 0.0f), vec3(1.0f, -1.0f, 0.0f), vec3(-1.0f, 1.0f, 0.0f),
 		vec3(1.0f, 1.0f, 0.0f) };
@@ -129,20 +93,19 @@ bool load_content() {
 	screen_quad.add_buffer(tex_coords, BUFFER_INDEXES::TEXTURE_COORDS_0);
 	screen_quad.set_type(GL_TRIANGLE_STRIP);
 
-
 	// Load up textures
 	textures["empty"] = texture("res/textures/empty_texture.png");
 	textures["dirt"] = texture("res/textures/dirt.jpg");
 	textures["brick"] = texture("res/textures/brick.jpg");
 	textures["metal"] = texture("res/textures/metal.png");
+	textures["tree"] = texture("res/textures/tree.png");
 
 	// Colour scale from red to black
-	vector<vec4> colour_data{ vec4(0.12f, 0.12f, 0.12f, 1.0f),
-		// vec4(0.12f, 0.12f, 0.12f, 1.0f),vec4(0.12f, 0.12f, 0.12f, 1.0f),vec4(0.12f, 0.12f, 0.12f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), 
+	vector<vec4> colour_data{ vec4(0.12f, 0.12f, 0.12f, 1.0f), vec4(0.12f, 0.12f, 0.12f, 1.0f),vec4(0.12f, 0.12f, 0.12f, 1.0f),vec4(0.12f, 0.12f, 0.12f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), 
 		vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f),
-		//vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f),
+		vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f),
 		vec4(1.0f, 1.0f, 1.0f, 1.0f),
-		// vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f) };
+		vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f) 
 	};
 	// Create 1D 4x1 texture from colour_data
 	textures["CS_DATA"] = texture(colour_data, colour_data.size(), 1, false, false);
@@ -189,98 +152,9 @@ bool load_content() {
 	outline.add_shader("res/shaders/outline.frag", GL_FRAGMENT_SHADER);
 	outline.build();
 
-	exposureShader.add_shader("res/shaders/simple_texture.vert", GL_VERTEX_SHADER);
-	exposureShader.add_shader("res/shaders/simple_texture.frag", GL_FRAGMENT_SHADER);
-	exposureShader.build();
-
-	computeShader.add_shader("res/shaders/smoke.comp", GL_COMPUTE_SHADER);
-	computeShader.build();
-
-	default_random_engine rand(duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
-	uniform_real_distribution<float> dist;
-
-	// Initilise particles
-	for (unsigned int i = 0; i < MAX_PARTICLES; ++i) {
-		smokePositions[i] = vec4((cubeSize.x / 2.0f) * dist(rand) - cubeSize.x / 4.0f, 8.0f * dist(rand), (cubeSize.z / 2.0f) * dist(rand) - cubeSize.z / 4.0f, dist(rand) + 0.1f );
-		// smokePositions[i] = vec4(((14.0f * dist(rand)) - 7.0f), 8.0f * dist(rand), 0.0f, 1.0f);
-		smokeVelocitys[i] = vec4(0.0f, 0.4f + (2.0f * dist(rand)), 0.0f, 0.0f);
-	}
-
-	
-
-	// Smoke
-
-	smokeShader.add_shader("res/shaders/smoke.vert", GL_VERTEX_SHADER);
-	smokeShader.add_shader("res/shaders/smoke.geom", GL_GEOMETRY_SHADER);
-	smokeShader.add_shader("res/shaders/smoke.frag", GL_FRAGMENT_SHADER);
-	smokeShader.build();
-
-	vector<vec3> pos;
-	printf("Cube step: %f, StepSize: %f", cubeStep.x, cubeStep.x * cubeSize.x);
-	
-	for (float k = -cubeSize.z / 2.0f; k <= cubeSize.z / 2.0f; k += cubeStep.z)
-	{
-		for (float j = -cubeSize.y / 2.0f; j <= cubeSize.y / 2.0f; j += cubeStep.y)
-		{
-			for (float i = -cubeSize.x / 2.0f; i <= cubeSize.x / 2.0f; i += cubeStep.x) {
-				pos.push_back(vec3(i, j, k));
-			}
-		}
-	}
-
-	// Add to the geometry
-	cube.add_buffer(pos, BUFFER_INDEXES::POSITION_BUFFER);
-	cube.set_type(GL_POINTS);
-
-	GLuint program = smokeShader.get_program();
-
-	//Bind program object for parameters setting
-	glUseProgramObjectARB(program);
-
-	//Triangle Table texture//
-	//This texture store the vertex index list for
-	//generating the triangles of each configurations.
-	//(cf. MarchingCubes.cpp)
-	glGenTextures(1, &triTableTexture);
-	glActiveTexture(GL_TEXTURE2);
-	//glEnable(GL_TEXTURE_2D);
-	glBindTexture(GL_TEXTURE_2D, triTableTexture);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RG16I, 16, 256, 0,
-		GL_RED_INTEGER, GL_INT, &triTable);
-
-	////Samplers assignment///
-	glUniform1iARB(glGetUniformLocationARB(program, "dataFieldTex"), 0);
-	glUniform1iARB(glGetUniformLocationARB(program, "edgeTableTex"), 1);
-	glUniform1iARB(glGetUniformLocationARB(program, "triTableTex"), 2);
-
-	////Uniforms parameters////
-	//Initial isolevel
-	glUniform1fARB(glGetUniformLocationARB(program, "isolevel"), 1.0f);
-	//Step in data 3D texture for gradient computation (lighting)
-	glUniform3fARB(glGetUniformLocationARB(program, "dataStep"), 1.0f / 128.0f, 1.0f / 128.0f, 1.0f / 128.0f);
-	glUniform3fvARB(glGetUniformLocationARB(program, "bounds"), 1, value_ptr(cubeSize));
-
-	cubeStep /= 2.0f;
-	//Decal for each vertex in a marching cube
-	glUniform3fARB(glGetUniformLocationARB(program, "vertDecals[0]"), -cubeStep.x, -cubeStep.y, -cubeStep.z);
-	glUniform3fARB(glGetUniformLocationARB(program, "vertDecals[1]"), cubeStep.x, -cubeStep.y, -cubeStep.z);
-	glUniform3fARB(glGetUniformLocationARB(program, "vertDecals[2]"), cubeStep.x, cubeStep.y, -cubeStep.z);
-	glUniform3fARB(glGetUniformLocationARB(program, "vertDecals[3]"), -cubeStep.x, cubeStep.y, -cubeStep.z);
-	glUniform3fARB(glGetUniformLocationARB(program, "vertDecals[4]"), -cubeStep.x, -cubeStep.y, cubeStep.z);
-	glUniform3fARB(glGetUniformLocationARB(program, "vertDecals[5]"), cubeStep.x, -cubeStep.y, cubeStep.z);
-	glUniform3fARB(glGetUniformLocationARB(program, "vertDecals[6]"), cubeStep.x, cubeStep.y, cubeStep.z);
-	glUniform3fARB(glGetUniformLocationARB(program, "vertDecals[7]"), -cubeStep.x, cubeStep.y, cubeStep.z);
-	
-	glUseProgramObjectARB(0);
-	// End Smoke
-
-
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+	smokePS = ParticleSystem(16);
+	smokePS.Init(vec3(6.0f, 16.0f, 6.0f));
+	smokePS.SetPosition(vec3(0.0f, 5.0f, 0.0f));
 
 	auto player = (Player*)gameObjects["player"];
 	player->Initialize();
@@ -288,15 +162,35 @@ bool load_content() {
 	gBuffer = GBuffer();
 	gBuffer.Init(screenSize.x, screenSize.y);
 
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+	glGenFramebuffers(1, &outlineBuffer);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, outlineBuffer);
+
+	glGenTextures(1, &outlineTexture);
+	glBindTexture(GL_TEXTURE_2D, outlineTexture);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, screenSize.x, screenSize.y, 0, GL_RGBA, GL_FLOAT, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, outlineTexture, 0);
+	glDrawBuffer(GL_COLOR_ATTACHMENT0);
+
+	GLenum Status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+
+	if (Status != GL_FRAMEBUFFER_COMPLETE) {
+		printf("MAIN FB error, status: 0x%x\n", Status);
+		return false;
+	}
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	return true;
 }
 
 
 bool update(float delta_time) {
-	renderer::bind(computeShader);
-	glUniform1f(computeShader.get_uniform_location("delta_time"), delta_time);
-	glUniform3fv(computeShader.get_uniform_location("max_dims"), 1, value_ptr(cubeSize/2.0f));
-
+	smokePS.UpdateDelta(delta_time);
 	InputHandler::Update(delta_time);
 
 	camera* currentCam = camController.GetActiveCamera();
@@ -312,8 +206,6 @@ bool update(float delta_time) {
 		{
 			double dx, dy;
 			InputHandler::GetRealMouseDelta(&dx, &dy);
-
-			//gameObjects["turret"]->get_mesh()->get_transform().rotate(vec3(0.0f, dx*delta_time, 0.0f));
 
 			playerCamera.rotate(vec3(-dy, -dx, 0.0f));
 			playerCamera.set_target_pos(gameObjects["turretBase"]->get_world_position());
@@ -355,30 +247,13 @@ bool update(float delta_time) {
 
 	player->update(delta_time);
 
-	// Update the shadow map light_position from the spot light
-	shadow.light_position = spotLights[0].get_position();
-	// do the same for light_dir property
-	shadow.light_dir = spotLights[0].get_direction();
-
 	glfwPollEvents();
 
   return true;
 }
 
 bool render() {
-	// CalculateExposure();
-
-	// Bind Compute Shader
-	renderer::bind(computeShader);
-	// Bind data as SSBO
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, G_Position_buffer);
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, G_Velocity_buffer);
-	// Dispatch
-	glDispatchCompute(MAX_PARTICLES, 1, 1);
-	// Sync, wait for completion
-	glMemoryBarrier(GL_ALL_BARRIER_BITS);
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 1);
+	smokePS.SyncData();
 
 	gBuffer.StartFrame();
 
@@ -398,7 +273,7 @@ bool render() {
 	
 	DSDirectionalLightPass();
 
-	// RenderFrameOnScreen();
+	RenderFrameOnScreen();
 
 	RenderOutline();
 
@@ -418,63 +293,6 @@ void main() {
   application.run();
 }
 
-void CalculateExposure()
-{
-	// 0.5 Calculate average luminence of last frame's scene (pingpongColorBuffer[0] filled at end of loop (see last section of code))
-	if (!firstFrame)
-	{
-		GLuint texWidth = (int)screenSize.x, texHeight = (int)screenSize.y;
-		GLboolean change = true;
-
-		int i = 1;
-
-		// Then pingpong between color buffers creating a smaller texture every time
-		while (texWidth > 1)
-		{
-			// first change texture 
-			texWidth = texWidth / 2;
-			texHeight = texHeight / 2;
-
-			renderer::bind(exposureShader);
-
-			glBindTexture(GL_TEXTURE_2D, pingpongColorBuffer[change ? 1 : 0]);
-			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, texWidth > 1 ? texWidth : 1, texHeight > 1 ? texHeight : 1, 0, GL_RGB, GL_FLOAT, NULL);
-
-			glBindFramebuffer(GL_DRAW_FRAMEBUFFER, pingpongFBO[change ? 1 : 0]);
-			glDrawBuffer(GL_COLOR_ATTACHMENT0);
-			glClear(GL_COLOR_BUFFER_BIT);
-			// glViewport(0, 0, texWidth, texHeight);
-			glActiveTexture(GL_TEXTURE0);
-			glBindTexture(GL_TEXTURE_2D, pingpongColorBuffer[change ? 0 : 1]);
-
-			glUniform1i(exposureShader.get_uniform_location("tAlbedo"), 0);
-			glUniformMatrix4fv(exposureShader.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(mat4(1.0f)));
-
-			renderer::render(screen_quad);
-
-			change = !change;
-		}
-
-		// Once done read the luminescence value of 1x1 texture
-		float luminescence[3];
-		glReadPixels(0, 0, 1, 1, GL_RGB, GL_FLOAT, &luminescence);
-		float lum = 0.2126f * luminescence[0] + 0.7152f * luminescence[1] + 0.0722f * luminescence[2];
-		if (lum <= 0.0f)
-			lum = 0.001f;
-
-		exposure = lerp(exposure, 0.5f / lum, 0.05f); // slowly adjust exposure based on average brightness
-
-		glBindTexture(GL_TEXTURE_2D, 0);
-		glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	}
-	else
-	{
-		exposure = 1.0f;
-		lastExposure = exposure;
-		firstFrame = false;
-	}
-}
-
 void DSGeometryPass()
 {
 	gBuffer.BindForGeometryPass();
@@ -487,9 +305,7 @@ void DSGeometryPass()
 	glEnable(GL_DEPTH_TEST);
 
 	camera* currentCam = camController.GetActiveCamera();
-	mat4 V = currentCam->get_view();
-	mat4 P = currentCam->get_projection();
-	auto VP = P * V;
+	auto VP = camController.GetCurrentVPMatrix();
 	mat4 LightProjectionMat = perspective<float>(90.f, renderer::get_screen_aspect(), 0.1f, 1000.f);
 
 	// Bind effect
@@ -538,37 +354,8 @@ void DSGeometryPass()
 		renderer::render(*m->get_mesh());
 	}
 
+	smokePS.Render(&camController);
 
-	renderer::bind(smokeShader);
-	glEnable(GL_BLEND); 
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	glDepthMask(GL_FALSE);
-
-	auto MVP = P * V * mat4(1.0f);
-
-	//Current isolevel uniform parameter setting
-	glUniform1f(smokeShader.get_uniform_location("isolevel"), blendValue);
-	glUniform1i(smokeShader.get_uniform_location("gMetaballCount"), MAX_PARTICLES);
-
-	// Set MV, and P matrix uniforms seperatly
-	glUniformMatrix4fv(smokeShader.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(MVP));
-	glUniformMatrix4fv(smokeShader.get_uniform_location("MV"), 1, GL_FALSE, value_ptr(V));
-	glUniformMatrix4fv(smokeShader.get_uniform_location("P"), 1, GL_FALSE, value_ptr(P));
-
-	glActiveTexture(GL_TEXTURE2);
-	//glEnable(GL_TEXTURE_2D);
-	glBindTexture(GL_TEXTURE_2D, triTableTexture);
-	renderer::bind(textures["brick"], 0);
-	glUniform1i(smokeShader.get_uniform_location("tex"), 0);
-
-	// Bind position buffer as GL_ARRAY_BUFFER
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, G_Position_buffer);
-	// Render
-	renderer::render(cube);
-	// Tidy up
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-
-	glDisable(GL_BLEND);
 	glDepthMask(GL_FALSE);
 }
 
@@ -588,9 +375,7 @@ float CalcPointLightSphere(point_light light)
 
 void DSStencilPass(int lightIndex)
 {
-	camera* cam = camController.GetActiveCamera();
-	auto V = cam->get_view();
-	auto P = cam->get_projection();
+	auto VP = camController.GetCurrentVPMatrix();
 
 	gBuffer.BindForStencilPass();
 
@@ -612,13 +397,9 @@ void DSStencilPass(int lightIndex)
 	pLight.get_transform().scale = vec3(CalcPointLightSphere(pointLights[lightIndex]));
 
 	auto M = pLight.get_transform().get_transform_matrix();
-	auto MVP = P * V * M;
+	auto MVP = VP * M;
 
 	renderer::bind(pointLights[lightIndex], "gPointLight");
-
-	renderer::bind(textures["CS_DATA"], 6);
-	glUniform1i(stencilPass.get_uniform_location("tCellShading"), 6);
-
 
 	glUniformMatrix4fv(stencilPass.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(MVP));
 	renderer::render(pLight);
@@ -640,14 +421,13 @@ void DSPointLightPass(int lightIndex)
 
 	renderer::bind(pointLightPass);
 	camera* cam = camController.GetActiveCamera();
-	auto V = cam->get_view();
-	auto P = cam->get_projection();
+	auto VP = camController.GetCurrentVPMatrix();
 
 	pLight.get_transform().position = pointLights[lightIndex].get_position();
 	pLight.get_transform().scale = vec3(CalcPointLightSphere(pointLights[lightIndex]));
 
 	auto M = pLight.get_transform().get_transform_matrix();
-	auto MVP = P * V * M;
+	auto MVP = VP * M;
 
 	renderer::bind(pointLights[lightIndex], "gPointLight");
 	glUniform3fv(pointLightPass.get_uniform_location("gEyeWorldPos"), 1, value_ptr(cam->get_position()));
@@ -696,51 +476,21 @@ void DSDirectionalLightPass()
 
 void RenderFrameOnScreen()
 {
-	// somewhere end of loop, store current frame's content in one of the pingpong FBO'scene (and reset buffer sizes)
-	for (GLuint i = 0; i < 2; i++)
-	{
-		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, pingpongFBO[i]);
-		// Reset color buffer dimensions
-		glBindTexture(GL_TEXTURE_2D, pingpongColorBuffer[i]);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, screenSize.x, screenSize.y, 0, GL_RGB, GL_FLOAT, NULL);
-	}
-
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, pingpongFBO[0]);
-	glDrawBuffer(GL_COLOR_ATTACHMENT0);
-	glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
-	glClear(GL_COLOR_BUFFER_BIT);
-
-	renderer::bind(exposureShader);
-
-	glActiveTexture(GL_TEXTURE0);
-	glEnable(GL_TEXTURE_2D);
-	glBindTexture(GL_TEXTURE_2D, gBuffer.GetFinalTexture());
-
-	glUniform1i(exposureShader.get_uniform_location("tAlbedo"), 0);
-	glUniformMatrix4fv(exposureShader.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(mat4(1.0f)));
-
-	renderer::render(screen_quad);
-
-
 	gBuffer.BindForFinalPass();
-
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, frame.get_buffer());
+	
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, outlineBuffer);
+	glDrawBuffer(GL_COLOR_ATTACHMENT0);
 
 	renderer::bind(deferredRendering);
 
-	renderer::bind(textures["CELL_DATA"], 6);
-
-	// Bind depth texture
-	glActiveTexture(GL_TEXTURE0);
+	glActiveTexture(GL_TEXTURE1);
 	glEnable(GL_TEXTURE_2D);
 	glBindTexture(GL_TEXTURE_2D, gBuffer.GetFinalTexture());
+	glUniform1i(deferredRendering.get_uniform_location("tAlbedo"), 1);
 
-	glUniform1i(deferredRendering.get_uniform_location("tAlbedo"), 0);
-
+	renderer::bind(textures["CS_DATA"], 6);
 	glUniform1i(deferredRendering.get_uniform_location("tCellShading"), 6);
 
-	glUniform1i(deferredRendering.get_uniform_location("depthOnly"), depthOnly);
-	glUniform1f(deferredRendering.get_uniform_location("exposure"), exposure);
 	glUniformMatrix4fv(deferredRendering.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(mat4(1.0f)));
 
 	renderer::render(screen_quad);
@@ -748,27 +498,28 @@ void RenderFrameOnScreen()
 
 void RenderOutline()
 {
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 	renderer::bind(outline);
 
 	// MVP is now the identity matrix
 	glUniformMatrix4fv(outline.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(mat4(1.0)));
 
 	// Bind depth texture
-	glActiveTexture(GL_TEXTURE0);
+	glActiveTexture(GL_TEXTURE1);
 	glEnable(GL_TEXTURE_2D);
-	glBindTexture(GL_TEXTURE_2D, gBuffer.GetFinalTexture());
+	glBindTexture(GL_TEXTURE_2D, outlineTexture);
 	// Bind depth texture
 	glActiveTexture(GL_TEXTURE3);
 	glEnable(GL_TEXTURE_2D);
 	glBindTexture(GL_TEXTURE_2D, gBuffer.GetDepthTexture());
 
 	// Set the tex uniform
-	glUniform1i(outline.get_uniform_location("tAlbedo"), 0);
+	glUniform1i(outline.get_uniform_location("tPosition"), 0);
+	glUniform1i(outline.get_uniform_location("tAlbedo"), 1);
 	glUniform1i(outline.get_uniform_location("tNormals"), 2);
-	glUniform1i(deferredRendering.get_uniform_location("tCellShading"), 6);
+	glUniform1i(outline.get_uniform_location("tDepth"), 3);
+	glUniform1i(outline.get_uniform_location("tCellShading"), 6);
 	// Set the tex uniform
-	glUniform1i(outline.get_uniform_location("depth"), 1);
 	// Set the screen_size uniform
 	glUniform2fv(outline.get_uniform_location("screen_size"), 1, value_ptr(vec2(renderer::get_screen_width(), renderer::get_screen_height())));
 	// Set the T uniform
@@ -791,37 +542,24 @@ void SetupLights()
 	// Directional light
 	ambientLight.set_ambient_intensity(vec4(0.2f));
 	ambientLight.set_light_colour(vec4(1.0f, 1.0f, 1.0f, 1.0f));
-	ambientLight.set_direction(normalize(vec3(0.2f, -1.0f, 0.35f)));
+	ambientLight.set_direction(normalize(vec3(1.0f, 1.0f, -1.0f)));
 
 	// Point lights
 	pointLights[0].set_position(vec3(-15.0f, 4.0f, -15.0f));
-	pointLights[0].set_light_colour(vec4(50.0f));
-	pointLights[0].set_range(7.0f);
+	pointLights[0].set_light_colour(vec4(0.2f, 0.6f, 0.3f, 1.0f));
+	pointLights[0].set_range(3.0f);
 
 	pointLights[1].set_position(vec3(-15.0f, 4.0f, 10.0f));
-	pointLights[1].set_light_colour(vec4(100.0f));
-	pointLights[1].set_range(5.0f + rand() % 10);
+	pointLights[1].set_light_colour(vec4(0.3f, 0.0f, 0.2f, 1.0f));
+	pointLights[1].set_range(2.0f + rand() % 5);
 
 	pointLights[2].set_position(vec3(5.0f, 10.0f, -7.0f));
-	pointLights[2].set_light_colour(vec4(20.0f));
-	pointLights[2].set_range(5.0f + rand() % 10);
+	pointLights[2].set_light_colour(vec4(0.24f, 0.20f, 0.31f, 1.0f));
+	pointLights[2].set_range(4.0f + rand() % 3);
 
 	pointLights[3].set_position(vec3(2.0f, 4.0f, 20.0f));
-	pointLights[3].set_light_colour(vec4(90.0f));
-	pointLights[3].set_range(5.0f + rand() % 10);
-
-	// Spot lights
-	spotLights[0].set_position(vec3(0.0f, 10.0f, 10.0f));
-	spotLights[0].set_light_colour(vec4(1.0f, 1.0f, 0.0f, 1.0f));
-	spotLights[0].set_direction(normalize(vec3(-2.0f, -5.0f, -4.0f)));
-	spotLights[0].set_range(25.0f);
-	spotLights[0].set_power(0.5f); 
-
-	spotLights[1].set_position(vec3(15.0f, 7.0f, -5.0f));
-	spotLights[1].set_light_colour(vec4(0.1f, 0.6f, 0.9f, 1.0f));
-	spotLights[1].set_direction(normalize(vec3(-0.4f, -5.0f, 2.0f)));
-	spotLights[1].set_range(35.0f);
-	spotLights[1].set_power(0.5f);
+	pointLights[3].set_light_colour(vec4(0.0f, 0.21f, 0.19f, 1.0f));
+	pointLights[3].set_range(5.0f + rand() % 4);
 }
 
 void SetupGeometry()
@@ -850,10 +588,20 @@ void SetupGeometry()
 	sphereMesh.get_material().set_shininess(10.0f);
 	sphereMesh.get_material().set_diffuse(vec4(0.2f, 0.2f, 0.7f, 1.0f));
 
+	mesh treeMesh = mesh(geometry("res/models/tree.obj"));
+	treeMesh.get_material().set_shininess(100.0f);
+	treeMesh.get_material().set_specular(vec4(54.0f, 92.0f, 61.0f, 255.0f) / vec4(255.0f));
+	treeMesh.get_material().set_diffuse(vec4(1.0f));
+
+	treeMesh.get_transform().scale = vec3(2.5f);
+
 	// Create game objects
 	// Ground object
 	gameObjects["floor"] = new RenderedObject(floorMesh, &textures["dirt"]); // , &normals["dirt"]);
 	gameObjects["floor"]->get_mesh()->get_transform().position = vec3(0.0f, 0.0f, 0.0f);
+
+	gameObjects["tree"] = new RenderedObject(treeMesh, &textures["tree"]);
+	gameObjects["tree"]->get_mesh()->get_transform().position = vec3(40.0f, 0.0f, -12.0f);
 
 	// Player object
 	player = new Player(boxMesh, &textures["metal"], &normals["metal"]);

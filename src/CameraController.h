@@ -18,6 +18,10 @@ public:
 	camera* GetActiveCamera();
 	camera* GetCameraByName(string name);
 
+	mat4 GetCurrentViewMatrix();
+	mat4 GetCurrentProjectionMatrix();
+	mat4 GetCurrentVPMatrix();
+
 	target_camera* CreateTargetCamera(string name);
 	chase_camera* CreateChaseCamera(string name);
 	free_camera* CreateFreeCamera(string name);
@@ -40,6 +44,13 @@ private:
 	target_camera* staticCam;
 	chase_camera chaseCam;
 	free_camera* freeCam;
+
+	mat4 currentV;
+	mat4 currentP;
+	mat4 currentVP;
+
+	void UpdateCameraMatrices(camera* cam);
+	void SetCamera(int id);
 
 	void NextCamera();
 	void PreviousCamera();

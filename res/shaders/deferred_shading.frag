@@ -8,7 +8,7 @@ layout(location = 0) in vec4 position;
 // Incoming texture coordinate
 layout(location = 1) in vec2 tex_coord;
 // Incoming normal
-layout(location = 2) in vec3 normal;
+layout(location = 2) in vec4 normal;
 // Incoming tangent
 layout(location = 3) in vec3 tangent;
 // Incoming binormal
@@ -21,7 +21,7 @@ layout(location = 6) in vec4 specular;
 // They all were vec4!!
 layout(location = 0) out vec4 position_out;
 layout(location = 1) out vec4 diffuse_out;
-layout(location = 2) out vec3 normal_out;
+layout(location = 2) out vec4 normal_out;
 layout(location = 3) out vec4 mat_diffuse_out;
 layout(location = 4) out vec4 mat_specular_out;
 
@@ -31,7 +31,8 @@ void main()
 {
 	diffuse_out	 = texture2D(tex_diffuse,tex_coord);
 	position_out = position;
-	normal_out	 = calc_normal(normal, tangent, binormal, normal_map, tex_coord);
+	float shininess = normal.a;
+	normal_out	 = vec4( calc_normal(normal.rgb, tangent, binormal, normal_map, tex_coord), shininess );
 	mat_diffuse_out	 = diffuse;
 	mat_specular_out = specular;
 }
