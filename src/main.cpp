@@ -10,14 +10,10 @@
 #include "ParticleSystem.h"
 #include "Skybox.h"
 
-using namespace std::chrono;
-
 // Geometry
 map<string, RenderedObject*> gameObjects;
 
 // Shaders
-
-
 effect deferredShading;
 effect deferredRendering;
 
@@ -41,6 +37,9 @@ CameraController camController;
 
 /// Custom effects
 ParticleSystem smokePS;
+float windSpeed;
+vec3 windDirection;
+
 Skybox skyBox;
 
 /// Post-process
@@ -72,6 +71,10 @@ int depthOnly = 0;
 // Deferred render vars
 GBuffer gBuffer;
 GLuint outlineTexture, outlineBuffer;
+
+// Random numbers
+default_random_engine engine(duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
+uniform_real_distribution<float> dist;
 
 bool initialise() {
 	// Set input mode - hide the cursor
@@ -162,15 +165,19 @@ bool load_content() {
 
 	// Set up smoke particles
 	smokePS = ParticleSystem(32);
-	smokePS.Init(vec3(6.0f, 16.0f, 6.0f));
-	smokePS.SetParticleSize(0.2f, 0.4f);
-	smokePS.SetParticleSpeed(0.2f, 20.0f);
+	smokePS.Init(vec3(8.0f, 16.0f, 6.0f));
+	smokePS.SetParticleColour(vec4(1.0f, 0.3f, 0.0f, 1.0f), vec4(0.9f));
+	smokePS.SetSpawnRate(0.05f, 0.15f);
+	smokePS.SetParticleLifetime(1.0f, 5.0f);
+	smokePS.SetInitialParticleSize(0.2f, 1.0f);
+	smokePS.SetParticleSpeed(1.0f, 4.0f);
 	smokePS.SetParticleDirection(vec3(0.0f, 1.0f, 0.0f));
-	smokePS.SetWind(vec4(1.0f,0.0f,0.0f,0.2f));
-
 	smokePS.SetPosition(vec3(0.0f, 5.0f, 0.0f));
 
 	smokePS.SetEmitting(true);
+
+	windSpeed = 0.02f;
+	windDirection = vec3(1.0f, 0.0f, 0.0f);
 
 	// Set up the player
 	auto player = (Player*)gameObjects["player"];
@@ -267,6 +274,10 @@ bool update(float delta_time) {
 	else {
 		depthOnly = 0;
 	}
+
+	windDirection = lerp(windDirection, vec3((dist(engine) * 2.0f) - 1.0f, (dist(engine) * 2.0f) - 1.0f, (dist(engine) * 2.0f) - 1.0f), delta_time);
+	windSpeed = clamp( lerp( windSpeed, windSpeed + ( dist(engine) * 2.0f ) - 1.0f * dist(engine), delta_time ), -0.3f, 0.3f );
+	smokePS.SetWind(vec4(windDirection, windSpeed));
 
 	skyBox.SetPosition(currentCam->get_position());
 	player->update(delta_time);
@@ -576,15 +587,15 @@ void SetupLights()
 
 	pointLights[1].set_position(vec3(-15.0f, 4.0f, 10.0f));
 	pointLights[1].set_light_colour(vec4(0.3f, 0.0f, 0.2f, 1.0f));
-	pointLights[1].set_range(2.0f + rand() % 5);
+	pointLights[1].set_range(dist(engine) * 5.0f + 2.0f);
 
 	pointLights[2].set_position(vec3(5.0f, 10.0f, -7.0f));
 	pointLights[2].set_light_colour(vec4(0.24f, 0.20f, 0.31f, 1.0f));
-	pointLights[2].set_range(4.0f + rand() % 3);
+	pointLights[2].set_range(4.0f + dist(engine) * 3.0f);
 
 	pointLights[3].set_position(vec3(2.0f, 4.0f, 20.0f));
 	pointLights[3].set_light_colour(vec4(0.0f, 0.21f, 0.19f, 1.0f));
-	pointLights[3].set_range(5.0f + rand() % 4);
+	pointLights[3].set_range(5.0f + dist(engine) * 4.0f);
 }
 
 void SetupGeometry()

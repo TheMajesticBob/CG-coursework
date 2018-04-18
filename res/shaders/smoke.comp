@@ -9,44 +9,65 @@ layout(std430, binding = 1) buffer VelocityBuffer { vec4 velocities[]; };
 uniform bool isEmitting;
 
 // Particle vars
-uniform float sizeMin;
-uniform float sizeMax;
-uniform float speedMin;
-uniform float speedMax;
-
+uniform vec2 initialLifetime;
+uniform vec2 initialSize;
+uniform vec2 initialSpeed;
 uniform vec3 initialDirection;
 
-uniform mat4 MVP;
+// Time variables for calculations
 uniform float delta_time;
 uniform float time;
 
+// Box dimentions
 uniform vec3 max_dims;
 
 uniform vec4 windDirection;
 
-float hash( float n )
+
+// http://byteblacksmith.com/improvements-to-the-canonical-one-liner-glsl-rand-for-opengl-es-2-0/
+highp float rand(vec2 co)
 {
-    return fract(sin(n)*43758.5453);
+    highp float a = 12.9898;
+    highp float b = 78.233;
+    highp float c = 43758.5453;
+    highp float dt= dot(co.xy ,vec2(a,b));
+    highp float sn= mod(dt,3.14);
+    return fract(sin(sn) * c);
 }
 
-void SpawnNewParticle(in uint index, out vec4 new_pos, out vec4 vel)
+float hash( float n )
+{
+	return rand(vec2(n, sin(n)));
+    //return fract(sin(n)*43758.5453);
+}
+
+void SpawnNewParticle(in uint index, out vec3 newPos, out vec3 newVel, out float newSize, out float lifetime)
 {
 	float noise;
-	// Calculate random 0, 1 float
+	// Calculate random 0, 1 float for particle size
 	noise = ( hash( time * 498426.123 ) + 1.0 ) / 2.0;
-	float newSize = noise * ( sizeMax - sizeMin ) + sizeMin;
+	newSize = noise * ( initialSize.y - initialSize.x ) + initialSize.x;
 
-	// Calculate random -1, 1 float
-	noise = hash( newSize * time * 9745123.11 );
+	// Calculate random -1, 1 float for X position
+	noise = hash( newSize * time * 9745123.11 ) - 0.5;
 	float noiseX = noise * max_dims.x;
+	noiseX -= sign(noiseX) * newSize;
 
-	// Calculate random -1, 1 float
-	noise = hash( noiseX * delta_time * 9856423.7 );
-	float noiseZ = noise * max_dims.z * 0.5;
+	// Calculate random -1, 1 float for Z position
+	noise = hash( noiseX * delta_time * 9856423.7 ) - 0.5; 
+	float noiseZ = noise * max_dims.z;
+	noiseZ -= sign(noiseZ) * newSize;
 
-	new_pos = vec4( vec3(noiseX, -(max_dims.y / 4.0 + newSize * 2.0), noiseZ), newSize ); 
+	// Calculate 0, 1 float for particle speed
+	noise = ( hash( noiseZ * time * 198523.4 ) + 1.0 ) / 2.0;
+	float speed = noise * ( initialSpeed.y - initialSpeed.x ) + initialSpeed.x;
 
-	vel = vec4( initialDirection * ( ( hash( newSize * delta_time + noiseX + 1.4 * noiseZ ) + 1.0 ) / 2.0 * ( speedMax - speedMin ) + speedMin ), 0.0 );
+	// Calculate 0, 1 float for particle lifetime
+	noise = ( hash( speed * time * 417588.1 ) + 1.0 ) / 2.0;
+	lifetime = noise * ( initialLifetime.y - initialLifetime.x ) + initialLifetime.x;
+
+	newPos = vec3( noiseX, -(max_dims.y / 2.0 + newSize * 2.0), noiseZ ); 
+	newVel = vec3( initialDirection * speed );
 }
 
 void main() 
@@ -57,18 +78,36 @@ void main()
 	vec4 vel = velocities[index];
 	vec4 pos = positions[index];
 
-	float forceStrength = length(vel);
+	// Read the real values
+	vec3 realVelocity = vel.xyz;
+	vec3 realPosition = pos.xyz;
+	float remainingLifetime = vel.w;
+	float metaballSize = pos.w;
+	
+	// Particle dying
+	remainingLifetime -= delta_time;
 
-	// Upadte new_pos with velocity and delta_tims
-	vec4 new_pos = vec4( pos.xyz + vel.xyz * delta_time, max( pos.w, 0.6 ) );
-	// new_pos.w = mix( pos.w, vel.w, delta_time / 10.0 );
-
-	// When a particle leaves the bounding box move it downwards and generate a new size for it
-	if(isEmitting && (new_pos.y - pos.w * 2.0 > max_dims.y / 4.0 || new_pos.w <= 0.05)) {
-		SpawnNewParticle(index, new_pos, vel);
+	if( remainingLifetime < 0 )
+	{
+		if( isEmitting )
+		{
+			SpawnNewParticle(index, realPosition, realVelocity, metaballSize, remainingLifetime);
+		} else {
+			metaballSize = 0.0;
+		}
+	} else {
+		// Update particle variables
+		realPosition = vec3( realPosition + realVelocity * delta_time );
+		realVelocity = realVelocity;
+		metaballSize = mix( metaballSize, 1.0, 1 - ( remainingLifetime / initialLifetime.y ) * 0.0001 );
 	}
 
 	// Store the new position and velocity back into the buffers
-	velocities[index] = vel; // vec4( mix( vel.xyz, normalize(vel.xyz + windDirection * windStrength) * forceStrength, 0.01 ), 0.0 );
-	positions[index] = new_pos;
+	// velocities[index] = vec4( realVelocity, remainingLifetime ); //
+
+	vec3 windDir = windDirection.xyz;
+	float windStrength = windDirection.w;
+
+	velocities[index] = vec4( mix( realVelocity, realVelocity + windDir * windStrength, delta_time ), remainingLifetime);
+	positions[index] = vec4( realPosition, metaballSize );
 }

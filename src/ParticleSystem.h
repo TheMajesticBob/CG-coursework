@@ -26,8 +26,11 @@ public:
 	void UpdateDelta(float deltaTime);
 	void SyncData();
 
-	void SetParticleSize(float min, float max);
+	void SetParticleLifetime(float min, float max);
+	void SetParticleColour(vec4 start, vec4 end);
+	void SetInitialParticleSize(float min, float max);
 	void SetParticleSpeed(float min, float max);
+	void SetSpawnRate(float min, float max);
 	void SetParticleDirection(vec3 dir);
 	void SetWind(vec4 wind);
 
@@ -35,15 +38,28 @@ private:
 	void SetupComputingShader();
 	void SetupParticleShader();
 
+	void SpawnParticle(vec4* pos, vec4* vel);
+
 	bool isInitialised = false;
 	bool isEmitting = false;
 
-	float sizeMin, sizeMax;
-	float speedMin, speedMax;
+	default_random_engine rand;
+	uniform_real_distribution<float> dist;
+
+	vec2 initialLifetime;
+	vec2 initialSize;
+	vec2 sizeOverLifetimeFactor;
+	vec2 initialSpeed;
 	vec3 particleDirection = vec3(0.0f);
+	vec4 startColour;
+	vec4 endColour;
+
+	vec2 spawnRate = vec2(1.0f, 1.0f);
+	float lastSpawned = 0.0f;
 	
 	vec4 windDirection;
 
+	uint currentParticles;
 	uint maxParticles;
 	GLuint G_Position_buffer, G_Velocity_buffer;
 	GLuint triTableTexture;

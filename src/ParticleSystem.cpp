@@ -1,4 +1,5 @@
 #include "ParticleSystem.h"
+#include "time.h"
 
 extern int triTable[256][16];
 
@@ -14,6 +15,7 @@ ParticleSystem::ParticleSystem(int maxParticles)
 {
 	ParticleSystem::ParticleSystem();
 
+	this->currentParticles = 0;
 	this->maxParticles = maxParticles;
 
 	computeShader.add_shader("res/shaders/smoke.comp", GL_COMPUTE_SHADER);
@@ -35,7 +37,6 @@ void ParticleSystem::Init(vec3 cubeSize)
 {
 	this->cubeSize = cubeSize;
 
-	SetupComputingShader();
 	SetupParticleShader();
 }
 
@@ -43,21 +44,66 @@ void ParticleSystem::SetEmitting(bool isEmitting)
 {
 	if (!isInitialised)
 	{
-		SetupParticleShader();
+		SetupComputingShader();
 	}
 
 	renderer::bind(computeShader);
 	glUniform1i(computeShader.get_uniform_location("isEmitting"), (int)isEmitting);
+	this->isEmitting = isEmitting;
 }
 
 void ParticleSystem::UpdateDelta(float deltaTime)
 {
-	float systemTime = (float)duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+	clock_t t = clock();
 	renderer::bind(computeShader);
 	glUniform1f(computeShader.get_uniform_location("delta_time"), deltaTime);
-	glUniform1f(computeShader.get_uniform_location("time"), systemTime);
+	glUniform1f(computeShader.get_uniform_location("time"), float(t));
 	glUniform4fv(computeShader.get_uniform_location("windDirection"), 1, value_ptr(windDirection));
-	glUniform3fv(computeShader.get_uniform_location("max_dims"), 1, value_ptr(cubeSize));
+
+	if (isEmitting)
+	{
+		if (currentParticles < maxParticles)
+		{
+			lastSpawned -= deltaTime;
+			if (lastSpawned <= 0.0f)
+			{
+				vec4 pos, vel;
+				SpawnParticle(&pos, &vel);
+
+				printf("New particle data\n\r\t[%f,%f,%f,%f]\n\r\t[%f,%f,%f,%f]\n\r\n\r", pos.x, pos.y, pos.z, pos.w, vel.x, vel.y, vel.z, vel.w);
+
+				// Bind buffer to read/write data
+				glBindBuffer(GL_SHADER_STORAGE_BUFFER, G_Position_buffer);
+				// Map the buffer to position array
+				vec4 *positions = reinterpret_cast<vec4*>(
+					glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, sizeof(vec4) * maxParticles, GL_MAP_READ_BIT | GL_MAP_WRITE_BIT)
+				);
+				
+				// printf("Particle 0: [%f,%f,%f,%f]\n", positions[0].x, positions[0].y, positions[0].z, positions[0].w);
+				// Assign a new particle
+				positions[currentParticles] = pos;
+				// Unmap buffer
+				glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
+
+				// Same as the above but for velocities
+				glBindBuffer(GL_SHADER_STORAGE_BUFFER, G_Velocity_buffer);
+				vec4 *velocities = reinterpret_cast<vec4*>(
+					glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, sizeof(vec4) * maxParticles, GL_MAP_READ_BIT | GL_MAP_WRITE_BIT)
+					);
+				velocities[currentParticles] = vel;
+				glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
+
+				// Unbind buffer
+				glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+				currentParticles++;
+				lastSpawned = ( dist(rand) + 1.0f ) / 2.0f * ( spawnRate.y - spawnRate.x ) + spawnRate.x;
+
+				renderer::bind(smokeShader);
+				glUniform1i(smokeShader.get_uniform_location("gMetaballCount"), currentParticles);
+			}
+		}
+	}
 }
 
 void ParticleSystem::Render(CameraController* camControl)
@@ -82,7 +128,8 @@ void ParticleSystem::Render(CameraController* camControl)
 	glUniformMatrix4fv(smokeShader.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(MVP));
 
 	// Bind position buffer as GL_SHADER_STORAGE_BUFFER
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, G_Position_buffer);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, G_Position_buffer);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, G_Velocity_buffer);
 	// Render
 	renderer::render(boxMesh);
 	// Tidy up
@@ -110,18 +157,44 @@ void ParticleSystem::SyncData()
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 }
 
-void ParticleSystem::SetParticleSize(float min, float max)
+void ParticleSystem::SetParticleLifetime(float min, float max)
 {
+	initialLifetime = vec2(min, max);
 	renderer::bind(computeShader);
-	glUniform1f(computeShader.get_uniform_location("sizeMin"), min);
-	glUniform1f(computeShader.get_uniform_location("sizeMax"), max);
+	glUniform2fv(computeShader.get_uniform_location("initialLifetime"), 1, value_ptr(initialLifetime));
+
+
+	renderer::bind(smokeShader);
+	glUniform2fv(smokeShader.get_uniform_location("initialLifetime"), 1, value_ptr(initialLifetime));
+}
+
+void ParticleSystem::SetParticleColour(vec4 start, vec4 end)
+{
+	startColour = start;
+	endColour = end;
+
+	renderer::bind(smokeShader);
+	glUniform4fv(smokeShader.get_uniform_location("startColour"), 1, value_ptr(start));
+	glUniform4fv(smokeShader.get_uniform_location("endColour"), 1, value_ptr(end));
+}
+
+void ParticleSystem::SetInitialParticleSize(float min, float max)
+{
+	initialSize = vec2(min, max);
+	renderer::bind(computeShader);
+	glUniform2fv(computeShader.get_uniform_location("initialSize"), 1, value_ptr(initialSize));
 }
 
 void ParticleSystem::SetParticleSpeed(float min, float max)
 {
+	initialSpeed = vec2(min, max);
 	renderer::bind(computeShader);
-	glUniform1f(computeShader.get_uniform_location("speedMin"), min);
-	glUniform1f(computeShader.get_uniform_location("speedMax"), max);
+	glUniform2fv(computeShader.get_uniform_location("initialSpeed"), 1, value_ptr(initialSpeed));
+}
+
+void ParticleSystem::SetSpawnRate(float min, float max)
+{
+	spawnRate = vec2(min, max);
 }
 
 void ParticleSystem::SetParticleDirection(vec3 dir)
@@ -138,39 +211,48 @@ void ParticleSystem::SetWind(vec4 wind)
 	glUniform4fv(computeShader.get_uniform_location("windDirection"), 1, value_ptr(wind));
 }
 
+void ParticleSystem::SpawnParticle(vec4* pos, vec4* vel)
+{
+	float size = (dist(rand) + 1.0f) / 2.0f * (initialSize.y - initialSize.x) + initialSize.x;
+	vec3 position = vec3((cubeSize.x / 2.0f) * dist(rand) - (cubeSize.x / 4.0f), -(cubeSize.y / 2.0f) + size * 2.0f, (cubeSize.z / 2.0f) * dist(rand) - (cubeSize.z / 4.0f));
+	float speed = (dist(rand) + 1.0f) / 2.0f * (initialSpeed.y - initialSpeed.x) + initialSpeed.x;
+	float lifetime = (dist(rand) + 1.0f) / 2.0f * (initialLifetime.y - initialLifetime.x) + initialLifetime.x;
+	vec3 velocity = vec3(particleDirection) * speed;
+
+	*vel = vec4(velocity, lifetime);
+	*pos = vec4(position, size);
+}
+
 void ParticleSystem::SetupComputingShader()
 {
-	default_random_engine rand(duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
-	uniform_real_distribution<float> dist;
-	
+	/*
 	// Initilise particles
 	for (unsigned int i = 0; i < MAX_PARTICLES; ++i) {
-		vec4 newPos = vec4( ( cubeSize.x / 2.0f ) * dist(rand) - (cubeSize.x / 4.0f), 3.0f * dist(rand), (cubeSize.z / 2.0f) * dist(rand) - (cubeSize.z / 4.0f), dist(rand) * 1.2f + 0.4f);
-		
-		smokeVelocitys.push_back(vec4(0.0f, 0.2f + 8.0f * dist(rand), 0.0f, 0.0f));
+		vec4 pos;
+		vec4 vel;
+		SpawnParticle(&pos, &vel);
 
-		smokePositions.push_back(newPos);
-		printf("Particle [%f] pos [%f,%f,%f]\n\r", smokeVelocitys[i].y, newPos.x, newPos.y, newPos.z);
+		smokePositions.push_back(pos);
+		smokeVelocitys.push_back(vel);
 	}
+	*/
 
 	// Set up initial uniforms
 	glUniform1i(computeShader.get_uniform_location("isEmitting"), (int)isEmitting);
+	glUniform3fv(computeShader.get_uniform_location("max_dims"), 1, value_ptr(cubeSize/2.0f));
 
-	// A useless vao, but we need it bound or we get errors.
-	glGenVertexArrays(1, &vao);
-	glBindVertexArray(vao);
 	//Generate Position Data buffer
 	glGenBuffers(1, &G_Position_buffer);
-	// Bind as GL_SHADER_STORAGE_BUFFER
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, G_Position_buffer);
-	// Send Data to GPU, use GL_DYNAMIC_DRAW
-	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(vec4) * smokePositions.size(), &smokePositions[0], GL_DYNAMIC_DRAW);
 	// Generate Velocity Data buffer
 	glGenBuffers(1, &G_Velocity_buffer);
 	// Bind as GL_SHADER_STORAGE_BUFFER
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, G_Position_buffer);
+	// Send Data to GPU, use GL_DYNAMIC_DRAW
+	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(vec4) * maxParticles, NULL, GL_DYNAMIC_DRAW);
+	// Bind as GL_SHADER_STORAGE_BUFFER
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, G_Velocity_buffer);
 	// Send Data to GPU, use GL_DYNAMIC_DRAW
-	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(vec4) * smokeVelocitys.size(), &smokeVelocitys[0], GL_DYNAMIC_DRAW);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(vec4) * maxParticles, NULL, GL_DYNAMIC_DRAW);
 	// Unbind
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
@@ -231,7 +313,7 @@ void ParticleSystem::SetupParticleShader()
 	glUniform3fARB(glGetUniformLocationARB(program, "vertDecals[6]"), cubeStep.x, cubeStep.y, cubeStep.z);
 	glUniform3fARB(glGetUniformLocationARB(program, "vertDecals[7]"), -cubeStep.x, cubeStep.y, cubeStep.z);
 
-	glUniform1i(glGetUniformLocationARB(program, "gMetaballCount"), MAX_PARTICLES);
+	glUniform1i(glGetUniformLocationARB(program, "gMetaballCount"), 0);
 	// Unbind
 	glUseProgramObjectARB(0);
 }

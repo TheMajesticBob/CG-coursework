@@ -12,8 +12,9 @@ out VertexData
 
 // MVP matrix
 uniform mat4 MVP;
-
-uniform vec3 bounds;
+uniform vec4 startColour;
+uniform vec4 endColour;
+uniform vec2 initialLifetime;
 
 uniform int gMetaballCount;
 
@@ -30,6 +31,7 @@ uniform float isolevel;
 uniform vec3 vertDecals[8];
 
 layout(std430, binding = 0) buffer PositionBuffer { vec4 positions[]; };
+layout(std430, binding = 1) buffer VelocityBuffer { vec4 velocities[]; };
 
 //Get vertex i position within current marching cube
 vec3 cubePos( in int i )
@@ -38,10 +40,11 @@ vec3 cubePos( in int i )
 }
 
 //Get vertex i value within current marching cube
-float cubeVal( in int i, out vec3 nor )
+float cubeVal( in int i, out vec3 nor, out vec4 col )
 {
 	float value = 0.0;
 	nor = vec3(0.0);
+	col = vec4(0.0);
 	for( int j = 0; j < gMetaballCount; ++j )
 	{
 		float dist = distance( cubePos(i), positions[j].xyz );
@@ -49,6 +52,7 @@ float cubeVal( in int i, out vec3 nor )
 
 		vec3 n = 2.0 * (cubePos(i)-positions[j].xyz);
 		nor += n * positions[j].w * positions[j].w / ( dist * dist * dist * dist );
+		col += clamp( value, -1.0, 0.0 ) * -mix( startColour, endColour, positions[j].y / 1.0f ); //);
 	}
 
 	nor = normalize(nor);
@@ -72,11 +76,16 @@ void main(void)
 {  
 	float cubeVals[8];
 	vec3 cubeNormals[8];
+	vec4 outputColour = vec4(0.0);
 
 	for( int i = 0; i < 8; ++i )
 	{
-		cubeVals[i] = cubeVal(i, cubeNormals[i]);
+		vec4 tempColour;
+		cubeVals[i] = cubeVal(i, cubeNormals[i], tempColour);
+		outputColour += tempColour;
 	}
+
+	// outputColour = normalize(outputColour);
 	
 	int cubeIndex = 0;
 	//Determine the index into the edge table which tells us which vertices are inside of the surface
@@ -141,7 +150,7 @@ void main(void)
 				gl_Position = MVP * vec4(vertlist[triTableValue(cubeIndex, i+j)], 1);
 				position = gl_Position;
 				normal = vertNorms[triTableValue(cubeIndex, i+j)];
-				colour = mix( vec4(0.5,0.6,0.6,1.0), vec4(1.0), height / bounds.y );
+				colour = outputColour; // mix( startColour, endColour, height / bounds.y );
 				colour.a = 0.8;
 				EmitVertex();
 			}
