@@ -70,21 +70,23 @@ void main() {
 		depthSum += depths[i];
 		normalSum += normals[i];
 	}
-
-	vec4 edgeDepth = clamp( max(depthSum,normalSum) / flattening_value, 0.0, 1.0 ) * blend_value;
+	
+	normalSum -= vec4(0.2f);
+	vec4 edgeDepth = clamp( max( depthSum, normalSum ) / flattening_value, 0.0, 1.0 ) * blend_value;
+	float normalEdge = clamp( ( normalSum.x + normalSum.y + normalSum.z ) * 5.0, 0.0, 1.0 );
 
 	float near = clamp( 1.0 - (mainDepth.r / near_distance), 0.25, 1.0 );
-	float far = clamp( 1.0 - (mainDepth.r / far_distance), 0.0, 1.0 );
+	float far = clamp( 1.0 - (mainDepth.r / 2.0), 0.0, 1.0 );
 	float falloff = mix( near, far, blend_value );
 
-	float outlineValue = clamp( -log( 1-clamp( pow(length(edgeDepth * falloff), 2.0), 0.0, 1.0 ) ), 0.0, 1.0 );
+	float outlineValue = clamp( -log( 1-clamp( pow(length((edgeDepth + normalEdge) ), 2.0), 0.0, 1.0 ) ), 0.0, 1.0 );
 
 	if( depth_only == 1 )
 	{
-		colour = vec4( vec3( outlineValue ), 1.0 );
+		colour =mainNormal; // vec4( vec3( outlineValue ), 1.0 );
 	} else if( depth_only == 2 )
 	{
-		colour = vec4(falloff);
+		colour = vec4(outlineValue-far);
 		colour.a = 1.0;
 	} else {
 		colour = mix( texture( tAlbedo, tex_coord ), outline_colour, outlineValue );
