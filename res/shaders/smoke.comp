@@ -6,35 +6,48 @@ layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
 layout(std430, binding = 0) buffer PositionBuffer { vec4 positions[]; };
 layout(std430, binding = 1) buffer VelocityBuffer { vec4 velocities[]; };
 
-// Delta time
+uniform bool isEmitting;
+
+// Particle vars
+uniform float sizeMin;
+uniform float sizeMax;
+uniform float speedMin;
+uniform float speedMax;
+
+uniform vec3 initialDirection;
+
 uniform mat4 MVP;
 uniform float delta_time;
+uniform float time;
+
 uniform vec3 max_dims;
 
-uniform vec3 windDirection;
-uniform float windStrength;
+uniform vec4 windDirection;
 
 float hash( float n )
 {
     return fract(sin(n)*43758.5453);
 }
 
-float noise( vec3 x )
+void SpawnNewParticle(in uint index, out vec4 new_pos, out vec4 vel)
 {
-    // The noise function returns a value in the range -1.0f -> 1.0f
+	float noise;
+	// Calculate random 0, 1 float
+	noise = ( hash( time * 498426.123 ) + 1.0 ) / 2.0;
+	float newSize = noise * ( sizeMax - sizeMin ) + sizeMin;
 
-    vec3 p = floor(x);
-    vec3 f = fract(x);
+	// Calculate random -1, 1 float
+	noise = hash( newSize * time * 9745123.11 );
+	float noiseX = noise * max_dims.x;
 
-    f       = f * f * (3.0 - 2.0 * f);
-    float n = p.x + p.y * 57.0 + 113.0 * p.z;
+	// Calculate random -1, 1 float
+	noise = hash( noiseX * delta_time * 9856423.7 );
+	float noiseZ = noise * max_dims.z * 0.5;
 
-    return mix( mix( mix( hash(n + 0.0), hash(n + 1.0), f.x),
-                   mix( hash(n + 57.0), hash(n + 58.0), f.x), f.y),
-               mix (mix( hash(n + 113.0), hash(n + 114.0), f.x),
-                   mix( hash(n + 170.0), hash(n + 171.0), f.x), f.y), f.z);
+	new_pos = vec4( vec3(noiseX, -(max_dims.y / 4.0 + newSize * 2.0), noiseZ), newSize ); 
+
+	vel = vec4( initialDirection * ( ( hash( newSize * delta_time + noiseX + 1.4 * noiseZ ) + 1.0 ) / 2.0 * ( speedMax - speedMin ) + speedMin ), 0.0 );
 }
-
 
 void main() 
 {
@@ -51,12 +64,8 @@ void main()
 	// new_pos.w = mix( pos.w, vel.w, delta_time / 10.0 );
 
 	// When a particle leaves the bounding box move it downwards and generate a new size for it
-	if (new_pos.y - pos.w * 2.0 > max_dims.y || new_pos.w <= 0.05) {
-		float newSize = ( sin( length( pos.xyz * delta_time * 498426.123 ) ) + 1.04 ) * 1.11;
-		float noiseX = sin( length( pos.xyz + vec3( newSize * delta_time * 9745123.1 ) ) ) * max_dims.x * 0.5;
-		float noiseZ = sin( length( pos.xyz * vec3( noiseX * delta_time * 9856423.7 ) ) ) * max_dims.z * 0.5;
-		new_pos = vec4( vec3(noiseX, -(max_dims.y / 2 + newSize * 2.0), noiseZ), newSize ); 
-		vel = vec4( 0.0, clamp( cos( noiseZ ) + 1.0, 0.5, 1.5 ) * 5.0, 0.0, 0.0 );
+	if(isEmitting && (new_pos.y - pos.w * 2.0 > max_dims.y / 4.0 || new_pos.w <= 0.05)) {
+		SpawnNewParticle(index, new_pos, vel);
 	}
 
 	// Store the new position and velocity back into the buffers

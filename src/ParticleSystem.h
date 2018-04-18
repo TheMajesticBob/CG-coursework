@@ -20,18 +20,29 @@ public:
 	~ParticleSystem();
 
 	void Init(vec3 cubeSize);
+	void SetEmitting(bool isEmitting);
 	void SetPosition(vec3 position);
 	void Render(CameraController* camControl);
 	void UpdateDelta(float deltaTime);
 	void SyncData();
+
+	void SetParticleSize(float min, float max);
+	void SetParticleSpeed(float min, float max);
+	void SetParticleDirection(vec3 dir);
+	void SetWind(vec4 wind);
 
 private:
 	void SetupComputingShader();
 	void SetupParticleShader();
 
 	bool isInitialised = false;
-	float windStrength;
-	vec3 windDirection;
+	bool isEmitting = false;
+
+	float sizeMin, sizeMax;
+	float speedMin, speedMax;
+	vec3 particleDirection = vec3(0.0f);
+	
+	vec4 windDirection;
 
 	uint maxParticles;
 	GLuint G_Position_buffer, G_Velocity_buffer;
@@ -41,7 +52,6 @@ private:
 	effect computeShader, smokeShader;
 
 	mesh boxMesh;
-	mat4 transformMatrix;
 
 	vec3 cubeSize;
 	vec3 cubeStep = vec3(1.0f / RESOLUTION);

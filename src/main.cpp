@@ -1,50 +1,55 @@
 #include <glm\glm.hpp>
 #include <graphics_framework.h>
+// Custom framework
 #include "InputHandler.h"
 #include "RenderedObject.h"
 #include "Player.h"
+// Deferred shading
 #include "GBuffer.h"
+// Additional effects
 #include "ParticleSystem.h"
+#include "Skybox.h"
 
-using namespace std;
 using namespace std::chrono;
-using namespace graphics_framework;
-using namespace glm;
 
 // Geometry
 map<string, RenderedObject*> gameObjects;
 
 // Shaders
-effect outline;
 
-effect stencilPass;
-effect dirLightPass;
-effect pointLightPass;
 
 effect deferredShading;
 effect deferredRendering;
 
-// Lights
-mesh pLight;
+/// Lighting
+effect stencilPass; // Used to detect light "collisions"
+effect dirLightPass; // Directional light shader
+effect pointLightPass; // Point light shader
+
+mesh pLight; // Mesh used to render point lights
+
 vector<point_light> pointLights(4);
 directional_light ambientLight;
 
-// Textures
+/// Textures
 map<string, texture> textures;
 map<string, texture> normals;
 
 Player* player;
 chase_camera playerCamera;
 CameraController camController;
-ParticleSystem smokePS;
 
-// Post-process
+/// Custom effects
+ParticleSystem smokePS;
+Skybox skyBox;
+
+/// Post-process
+effect outline; // Outline shader
 vec2 screenSize;
-frame_buffer frame;
 geometry screen_quad;
 
 // Input vars
-float flatValue = 0.88f;
+float flatValue = -3.0f;
 float blendValue = 0.88f; // 100.0f;
 
 void SetupLights();
@@ -83,6 +88,7 @@ bool initialise() {
 }
 
 bool load_content() {
+	// Save screen size for other shaders
 	screenSize = vec2( renderer::get_screen_width(), renderer::get_screen_height() );
 
 	// Create screen quad
@@ -93,6 +99,10 @@ bool load_content() {
 	screen_quad.add_buffer(tex_coords, BUFFER_INDEXES::TEXTURE_COORDS_0);
 	screen_quad.set_type(GL_TRIANGLE_STRIP);
 
+	// Initialise GBuffer
+	gBuffer = GBuffer();
+	gBuffer.Init(screenSize.x, screenSize.y);
+
 	// Load up textures
 	textures["empty"] = texture("res/textures/empty_texture.png");
 	textures["dirt"] = texture("res/textures/dirt.jpg");
@@ -100,34 +110,32 @@ bool load_content() {
 	textures["metal"] = texture("res/textures/metal.png");
 	textures["tree"] = texture("res/textures/tree.png");
 
-	// Colour scale from red to black
+	// Load up normal textures
+	normals["empty"] = texture("res/textures/normals/empty_normal.png");
+	normals["dirt"] = texture("res/textures/normals/dirt_normal.jpg");
+	normals["brick"] = texture("res/textures/normals/brick_normal.jpg");
+	normals["metal"] = texture("res/textures/normals/metal_normal.png");
+
+	// Create cell shading texture
 	vector<vec4> colour_data{ vec4(0.12f, 0.12f, 0.12f, 1.0f), vec4(0.12f, 0.12f, 0.12f, 1.0f),vec4(0.12f, 0.12f, 0.12f, 1.0f),vec4(0.12f, 0.12f, 0.12f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), 
 		vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f),
 		vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f),
 		vec4(1.0f, 1.0f, 1.0f, 1.0f),
 		vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f) 
 	};
-	// Create 1D 4x1 texture from colour_data
 	textures["CS_DATA"] = texture(colour_data, colour_data.size(), 1, false, false);
 
-	normals["empty"] = texture("res/textures/normals/empty_normal.png");
-	normals["dirt"] = texture("res/textures/normals/dirt_normal.jpg");
-	normals["brick"] = texture("res/textures/normals/brick_normal.jpg");
-	normals["metal"] = texture("res/textures/normals/metal_normal.png");
+	// Create skybox
+	skyBox = Skybox();
+	skyBox.Init();
 
 	// Create some geometry
 	SetupGeometry();
 
-	// Create a camera for the player
-	playerCamera.set_pos_offset(vec3(0.0f, 4.0f, 10.0f));
-	playerCamera.set_springiness(0.5f);
-	playerCamera.set_projection(quarter_pi<float>(), renderer::get_screen_aspect(), 0.1f, 1000.0f);
-	playerCamera.move(gameObjects["turretBase"]->get_mesh()->get_transform().position, eulerAngles(gameObjects["turretBase"]->get_mesh()->get_transform().orientation));
-	camController.AddNewCamera("playerCamera", &playerCamera);
-
 	// Create lights
 	SetupLights();
 
+	// Load up shader files
 	deferredShading.add_shader("res/shaders/deferred_shading.vert", GL_VERTEX_SHADER);
 	deferredShading.add_shader("res/shaders/deferred_shading.frag", GL_FRAGMENT_SHADER);
 	deferredShading.add_shader("res/shaders/part_normal_map.frag", GL_FRAGMENT_SHADER);
@@ -152,16 +160,30 @@ bool load_content() {
 	outline.add_shader("res/shaders/outline.frag", GL_FRAGMENT_SHADER);
 	outline.build();
 
-	smokePS = ParticleSystem(16);
+	// Set up smoke particles
+	smokePS = ParticleSystem(32);
 	smokePS.Init(vec3(6.0f, 16.0f, 6.0f));
+	smokePS.SetParticleSize(0.2f, 0.4f);
+	smokePS.SetParticleSpeed(0.2f, 20.0f);
+	smokePS.SetParticleDirection(vec3(0.0f, 1.0f, 0.0f));
+	smokePS.SetWind(vec4(1.0f,0.0f,0.0f,0.2f));
+
 	smokePS.SetPosition(vec3(0.0f, 5.0f, 0.0f));
 
+	smokePS.SetEmitting(true);
+
+	// Set up the player
 	auto player = (Player*)gameObjects["player"];
 	player->Initialize();
 
-	gBuffer = GBuffer();
-	gBuffer.Init(screenSize.x, screenSize.y);
+	// Create a camera for the player
+	playerCamera.set_pos_offset(vec3(0.0f, 4.0f, 10.0f));
+	playerCamera.set_springiness(0.5f);
+	playerCamera.set_projection(quarter_pi<float>(), renderer::get_screen_aspect(), 0.1f, 1000.0f);
+	playerCamera.move(gameObjects["turretBase"]->get_mesh()->get_transform().position, eulerAngles(gameObjects["turretBase"]->get_mesh()->get_transform().orientation));
+	camController.AddNewCamera("playerCamera", &playerCamera);
 
+	// Set up a framebuffer for the outline effect
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
 	glGenFramebuffers(1, &outlineBuffer);
@@ -184,6 +206,7 @@ bool load_content() {
 		return false;
 	}
 
+	// Reset buffer
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	return true;
 }
@@ -245,6 +268,7 @@ bool update(float delta_time) {
 		depthOnly = 0;
 	}
 
+	skyBox.SetPosition(currentCam->get_position());
 	player->update(delta_time);
 
 	glfwPollEvents();
@@ -297,16 +321,18 @@ void DSGeometryPass()
 {
 	gBuffer.BindForGeometryPass();
 
+	auto VP = camController.GetCurrentVPMatrix();
+
 	glDepthMask(GL_TRUE);
 	// Clear the render targets
 	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-	
-	glEnable(GL_DEPTH_TEST);
 
-	camera* currentCam = camController.GetActiveCamera();
-	auto VP = camController.GetCurrentVPMatrix();
-	mat4 LightProjectionMat = perspective<float>(90.f, renderer::get_screen_aspect(), 0.1f, 1000.f);
+	// Render the skybox before anything else
+	skyBox.Render(VP);
+
+	// Make sure to enable depth test
+	glEnable(GL_DEPTH_TEST);
 
 	// Bind effect
 	renderer::bind(deferredShading);
@@ -518,15 +544,14 @@ void RenderOutline()
 	glUniform1i(outline.get_uniform_location("tAlbedo"), 1);
 	glUniform1i(outline.get_uniform_location("tNormals"), 2);
 	glUniform1i(outline.get_uniform_location("tDepth"), 3);
-	glUniform1i(outline.get_uniform_location("tCellShading"), 6);
 	// Set the tex uniform
 	// Set the screen_size uniform
 	glUniform2fv(outline.get_uniform_location("screen_size"), 1, value_ptr(vec2(renderer::get_screen_width(), renderer::get_screen_height())));
 	// Set the T uniform
 	glUniform1f(outline.get_uniform_location("blend_value"), blendValue);
 	glUniform1f(outline.get_uniform_location("flattening_value"), flatValue);
-	glUniform1f(outline.get_uniform_location("near_distance"), 60.0f);
-	glUniform1f(outline.get_uniform_location("far_distance"), 900.0f);
+	glUniform1f(outline.get_uniform_location("near_distance"), 0.2f);
+	glUniform1f(outline.get_uniform_location("far_distance"), 1.0f);
 	// Set outline colour
 	glUniform4fv(outline.get_uniform_location("outline_colour"), 1, value_ptr(vec4(0.0f, 0.0f, 0.0f, 1.0f)));
 	// Debug

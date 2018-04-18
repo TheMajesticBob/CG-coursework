@@ -7,8 +7,7 @@ ParticleSystem::ParticleSystem()
 	G_Position_buffer = 0;
 	G_Velocity_buffer = 0;
 
-	windStrength = 1.0f;
-	windDirection = normalize(vec3(0.5f, 0.0f, 0.5f));
+	windDirection = vec4(normalize(vec3(0.5f, 0.0f, 0.5f)), 1.0f);
 }
 
 ParticleSystem::ParticleSystem(int maxParticles)
@@ -38,21 +37,36 @@ void ParticleSystem::Init(vec3 cubeSize)
 
 	SetupComputingShader();
 	SetupParticleShader();
+}
 
-	isInitialised = true;
+void ParticleSystem::SetEmitting(bool isEmitting)
+{
+	if (!isInitialised)
+	{
+		SetupParticleShader();
+	}
+
+	renderer::bind(computeShader);
+	glUniform1i(computeShader.get_uniform_location("isEmitting"), (int)isEmitting);
 }
 
 void ParticleSystem::UpdateDelta(float deltaTime)
 {
+	float systemTime = (float)duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
 	renderer::bind(computeShader);
 	glUniform1f(computeShader.get_uniform_location("delta_time"), deltaTime);
-	glUniform3fv(computeShader.get_uniform_location("windDirection"), 1, value_ptr(normalize(windDirection)));
-	glUniform1f(computeShader.get_uniform_location("windStrength"), windStrength);
-	glUniform3fv(computeShader.get_uniform_location("max_dims"), 1, value_ptr(cubeSize / 2.0f));
+	glUniform1f(computeShader.get_uniform_location("time"), systemTime);
+	glUniform4fv(computeShader.get_uniform_location("windDirection"), 1, value_ptr(windDirection));
+	glUniform3fv(computeShader.get_uniform_location("max_dims"), 1, value_ptr(cubeSize));
 }
 
 void ParticleSystem::Render(CameraController* camControl)
 {
+	if (!isInitialised)
+	{
+		return;
+	}
+
 	auto MVP = camControl->GetCurrentVPMatrix() * boxMesh.get_transform().get_transform_matrix();
 
 	renderer::bind(smokeShader);
@@ -96,6 +110,34 @@ void ParticleSystem::SyncData()
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 }
 
+void ParticleSystem::SetParticleSize(float min, float max)
+{
+	renderer::bind(computeShader);
+	glUniform1f(computeShader.get_uniform_location("sizeMin"), min);
+	glUniform1f(computeShader.get_uniform_location("sizeMax"), max);
+}
+
+void ParticleSystem::SetParticleSpeed(float min, float max)
+{
+	renderer::bind(computeShader);
+	glUniform1f(computeShader.get_uniform_location("speedMin"), min);
+	glUniform1f(computeShader.get_uniform_location("speedMax"), max);
+}
+
+void ParticleSystem::SetParticleDirection(vec3 dir)
+{
+	particleDirection = dir;
+	renderer::bind(computeShader);
+	glUniform3fv(computeShader.get_uniform_location("initialDirection"), 1, value_ptr(dir));
+}
+
+void ParticleSystem::SetWind(vec4 wind)
+{
+	windDirection = wind;
+	renderer::bind(computeShader);
+	glUniform4fv(computeShader.get_uniform_location("windDirection"), 1, value_ptr(wind));
+}
+
 void ParticleSystem::SetupComputingShader()
 {
 	default_random_engine rand(duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
@@ -110,6 +152,9 @@ void ParticleSystem::SetupComputingShader()
 		smokePositions.push_back(newPos);
 		printf("Particle [%f] pos [%f,%f,%f]\n\r", smokeVelocitys[i].y, newPos.x, newPos.y, newPos.z);
 	}
+
+	// Set up initial uniforms
+	glUniform1i(computeShader.get_uniform_location("isEmitting"), (int)isEmitting);
 
 	// A useless vao, but we need it bound or we get errors.
 	glGenVertexArrays(1, &vao);
@@ -128,6 +173,8 @@ void ParticleSystem::SetupComputingShader()
 	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(vec4) * smokeVelocitys.size(), &smokeVelocitys[0], GL_DYNAMIC_DRAW);
 	// Unbind
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+	isInitialised = true;
 }
 
 void ParticleSystem::SetupParticleShader()
