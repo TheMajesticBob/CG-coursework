@@ -40,6 +40,8 @@ layout (location = 4) out vec3 binormal_out;
 layout (location = 5) out vec4 diffuse_out;
 // Outgoing specular
 layout (location = 6) out vec4 specular_out;
+// Outgoing emissive
+layout (location = 7) out vec4 emissive_out;
 
 void main( void )
 {
@@ -57,4 +59,5 @@ void main( void )
 
 	diffuse_out = mat.diffuse_reflection;
 	specular_out = mat.specular_reflection;
+	emissive_out = mat.emissive;
 }

@@ -70,8 +70,6 @@ void ParticleSystem::UpdateDelta(float deltaTime)
 				vec4 pos, vel;
 				SpawnParticle(&pos, &vel);
 
-				printf("New particle data\n\r\t[%f,%f,%f,%f]\n\r\t[%f,%f,%f,%f]\n\r\n\r", pos.x, pos.y, pos.z, pos.w, vel.x, vel.y, vel.z, vel.w);
-
 				// Bind buffer to read/write data
 				glBindBuffer(GL_SHADER_STORAGE_BUFFER, G_Position_buffer);
 				// Map the buffer to position array
@@ -133,7 +131,8 @@ void ParticleSystem::Render(CameraController* camControl)
 	// Render
 	renderer::render(boxMesh);
 	// Tidy up
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, 0);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, 0);
 
 	glDisable(GL_BLEND);
 }
@@ -154,7 +153,8 @@ void ParticleSystem::SyncData()
 	glDispatchCompute(MAX_PARTICLES, 1, 1);
 	// Sync, wait for completion
 	glMemoryBarrier(GL_ALL_BARRIER_BITS);
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, 0);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, 0);
 }
 
 void ParticleSystem::SetParticleLifetime(float min, float max)
@@ -225,22 +225,12 @@ void ParticleSystem::SpawnParticle(vec4* pos, vec4* vel)
 
 void ParticleSystem::SetupComputingShader()
 {
-	/*
-	// Initilise particles
-	for (unsigned int i = 0; i < MAX_PARTICLES; ++i) {
-		vec4 pos;
-		vec4 vel;
-		SpawnParticle(&pos, &vel);
-
-		smokePositions.push_back(pos);
-		smokeVelocitys.push_back(vel);
-	}
-	*/
-
 	// Set up initial uniforms
 	glUniform1i(computeShader.get_uniform_location("isEmitting"), (int)isEmitting);
 	glUniform3fv(computeShader.get_uniform_location("max_dims"), 1, value_ptr(cubeSize/2.0f));
-
+	
+	glGenVertexArrays(1, &vao);
+	glBindVertexArray(vao);
 	//Generate Position Data buffer
 	glGenBuffers(1, &G_Position_buffer);
 	// Generate Velocity Data buffer

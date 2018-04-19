@@ -10,18 +10,8 @@ out VertexData
 	vec2 tex_coord;
 };
 
-// MVP matrix
-uniform mat4 MVP;
-uniform vec4 startColour;
-uniform vec4 endColour;
-uniform vec2 initialLifetime;
-
-uniform int gMetaballCount;
-
 layout(points) in;
 layout(triangle_strip, max_vertices = 16) out;
-
-layout(location = 0) in float height[];
 
 // Triangles table texture
 uniform isampler2D triTableTex;
@@ -29,6 +19,13 @@ uniform isampler2D triTableTex;
 uniform float isolevel;
 // Marching cubes vertices decal
 uniform vec3 vertDecals[8];
+// MVP matrix
+uniform mat4 MVP;
+// Particle vars
+uniform vec4 startColour;
+uniform vec4 endColour;
+uniform vec2 initialLifetime;
+uniform int gMetaballCount;
 
 layout(std430, binding = 0) buffer PositionBuffer { vec4 positions[]; };
 layout(std430, binding = 1) buffer VelocityBuffer { vec4 velocities[]; };
@@ -128,27 +125,15 @@ void main(void)
 	//while(true)	{
 		if( triTableValue(cubeIndex, i) != -1 )
 		{
-			// Generate first vertex of triangle//
+			// Generate triangle vertices
 			// Fill position varying attribute for fragment shader
 			// Fill gl_Position attribute for vertex raster space position
-			  // fire temperature
-			  float temp = clamp(2.0 / (2.0 / (height[0])), 0.0, 1.0);
-			  // scale between white and red
-			  vec4 fire_colour = mix(vec4(1., .98, .42, 1.), vec4(0.88, .35, 0., 1.), temp);
-			  // and then between red and black
-			  fire_colour = mix(fire_colour, vec4(0), height[0] - 1.0);
-			  // fade smoke out near top
-			  //fire_colour.a = clamp((2.0 - height[0]) / 3.0, 0.0, 1.0);
-			  colour = fire_colour;
-
-			  float height = vec4( vertlist[ triTableValue(cubeIndex, i) ], 1).y;
-
 			vec4 pos[3];
 			vec3 nor[3];
 			for( int j = 0; j < 3; ++j )
 			{
-				gl_Position = MVP * vec4(vertlist[triTableValue(cubeIndex, i+j)], 1);
-				position = gl_Position;
+				position = vec4(vertlist[triTableValue(cubeIndex, i+j)], 1);
+				gl_Position = MVP * position;
 				normal = vertNorms[triTableValue(cubeIndex, i+j)];
 				colour = outputColour; // mix( startColour, endColour, height / bounds.y );
 				colour.a = 0.8;

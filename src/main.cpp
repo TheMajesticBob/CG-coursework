@@ -4,11 +4,13 @@
 #include "InputHandler.h"
 #include "RenderedObject.h"
 #include "Player.h"
+#include "Firefly.h"
 // Deferred shading
 #include "GBuffer.h"
 // Additional effects
 #include "ParticleSystem.h"
 #include "Skybox.h"
+#include "Terrain.h"
 
 // Geometry
 map<string, RenderedObject*> gameObjects;
@@ -35,8 +37,13 @@ Player* player;
 chase_camera playerCamera;
 CameraController camController;
 
+// Terrain
+Terrain m_Terrain;
+vec3 terrainSize;
+
 /// Custom effects
 ParticleSystem smokePS;
+Firefly firefliesPS;
 float windSpeed;
 vec3 windDirection;
 
@@ -56,17 +63,19 @@ void SetupGeometry();
 
 // Deferred shading methods
 void DSGeometryPass();
-void DSPointLightPass(int lightIndex);
-void DSStencilPass(int lightIndex);
+void DSPointLightPass(point_light* light);
+void DSStencilPass(point_light* light);
 void DSDirectionalLightPass();
 
 // Post-process methods
 void RenderFrameOnScreen();
 void RenderOutline();
 
-float CalcPointLightSphere(point_light light);
+float CalcPointLightSphere(point_light* light);
 
 int depthOnly = 0;
+// Random stuff
+const int MAX_FIREFLIES = 10;
 
 // Deferred render vars
 GBuffer gBuffer;
@@ -112,6 +121,9 @@ bool load_content() {
 	textures["brick"] = texture("res/textures/brick.jpg");
 	textures["metal"] = texture("res/textures/metal.png");
 	textures["tree"] = texture("res/textures/tree.png");
+	textures["grass"] = texture("res/textures/grass.png");
+	textures["stone"] = texture("res/textures/stone.jpg");
+	textures["stonygrass"] = texture("res/textures/stonygrass.jpg");
 
 	// Load up normal textures
 	normals["empty"] = texture("res/textures/normals/empty_normal.png");
@@ -120,17 +132,39 @@ bool load_content() {
 	normals["metal"] = texture("res/textures/normals/metal_normal.png");
 
 	// Create cell shading texture
-	vector<vec4> colour_data{ vec4(0.12f, 0.12f, 0.12f, 1.0f), vec4(0.12f, 0.12f, 0.12f, 1.0f),vec4(0.12f, 0.12f, 0.12f, 1.0f),vec4(0.12f, 0.12f, 0.12f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), 
-		vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f),
-		vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f),
-		vec4(1.0f, 1.0f, 1.0f, 1.0f),
-		vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f),vec4(1.0f, 1.0f, 1.0f, 1.0f) 
+	vector<vec4> colour_data{ 
+		// 4 pixels for darkest colours
+		vec4(0.12f, 0.12f, 0.12f, 1.0f), vec4(0.12f, 0.12f, 0.12f, 1.0f),vec4(0.12f, 0.12f, 0.12f, 1.0f), vec4(0.12f, 0.12f, 0.12f, 1.0f), 
+		// 6 pixels for quarter-lit
+		vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), vec4(0.25f, 0.25f, 0.25f, 1.0f), 
+		// 8 pixels for half lit
+		vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f), vec4(0.5f, 0.5f, 0.5f, 1.0f),
+		// 16 pixels for fully lit
+		vec4(1.0f, 1.0f, 1.0f, 1.0f), vec4(1.0f, 1.0f, 1.0f, 1.0f), vec4(1.0f, 1.0f, 1.0f, 1.0f), vec4(1.0f, 1.0f, 1.0f, 1.0f), vec4(1.0f, 1.0f, 1.0f, 1.0f), vec4(1.0f, 1.0f, 1.0f, 1.0f), vec4(1.0f, 1.0f, 1.0f, 1.0f), vec4(1.0f, 1.0f, 1.0f, 1.0f),
+		vec4(1.0f, 1.0f, 1.0f, 1.0f), vec4(1.0f, 1.0f, 1.0f, 1.0f), vec4(1.0f, 1.0f, 1.0f, 1.0f), vec4(1.0f, 1.0f, 1.0f, 1.0f), vec4(1.0f, 1.0f, 1.0f, 1.0f), vec4(1.0f, 1.0f, 1.0f, 1.0f), vec4(1.0f, 1.0f, 1.0f, 1.0f), vec4(1.0f, 1.0f, 1.0f, 1.0f)
 	};
 	textures["CS_DATA"] = texture(colour_data, colour_data.size(), 1, false, false);
 
 	// Create skybox
-	skyBox = Skybox();
 	skyBox.Init();
+
+	// Create terrain
+	// Load heightmap and terrain textures
+	texture height_map("res/textures/heightmap.png");
+	texture terrainTex[]{ textures["grass"],textures["grass"],textures["stonygrass"],textures["stone"] };
+
+	terrainSize = vec3(20, 20, 20);
+
+	m_Terrain.Init();
+	m_Terrain.LoadTerrain(height_map, terrainSize.x, terrainSize.y, 2.0f);
+	m_Terrain.SetTextures(terrainTex);
+
+	mesh* terrMesh = m_Terrain.GetMesh();
+	terrMesh->get_transform().scale = vec3(terrainSize.z);
+	terrMesh->get_material().set_diffuse(vec4(0.5f, 0.5f, 0.5f, 1.0f));
+	terrMesh->get_material().set_specular(vec4(0.0f, 0.0f, 0.0f, 1.0f));
+	terrMesh->get_material().set_shininess(20.0f);
+	terrMesh->get_material().set_emissive(vec4(0.0f, 0.0f, 0.0f, 1.0f));
 
 	// Create some geometry
 	SetupGeometry();
@@ -172,9 +206,13 @@ bool load_content() {
 	smokePS.SetInitialParticleSize(0.2f, 1.0f);
 	smokePS.SetParticleSpeed(1.0f, 4.0f);
 	smokePS.SetParticleDirection(vec3(0.0f, 1.0f, 0.0f));
-	smokePS.SetPosition(vec3(0.0f, 5.0f, 0.0f));
+	smokePS.SetPosition(vec3(0.0f, 8.0f, 0.0f));
 
 	smokePS.SetEmitting(true);
+
+	// Set up fireflies
+	firefliesPS = Firefly(vec3(32.0f, 20.0f, 32.0f), texture("res/textures/firefly.png"));
+	firefliesPS.Init(10);
 
 	windSpeed = 0.02f;
 	windDirection = vec3(1.0f, 0.0f, 0.0f);
@@ -220,8 +258,12 @@ bool load_content() {
 
 
 bool update(float delta_time) {
-	smokePS.UpdateDelta(delta_time);
+	// Update input
 	InputHandler::Update(delta_time);
+
+	// Update smoke particles
+	smokePS.UpdateDelta(delta_time);
+	firefliesPS.update(delta_time);
 
 	camera* currentCam = camController.GetActiveCamera();
 
@@ -275,9 +317,9 @@ bool update(float delta_time) {
 		depthOnly = 0;
 	}
 
-	windDirection = lerp(windDirection, vec3((dist(engine) * 2.0f) - 1.0f, (dist(engine) * 2.0f) - 1.0f, (dist(engine) * 2.0f) - 1.0f), delta_time);
-	windSpeed = clamp( lerp( windSpeed, windSpeed + ( dist(engine) * 2.0f ) - 1.0f * dist(engine), delta_time ), -0.3f, 0.3f );
-	smokePS.SetWind(vec4(windDirection, windSpeed));
+	//windDirection = lerp(windDirection, vec3((dist(engine) * 2.0f) - 1.0f, (dist(engine) * 2.0f) - 1.0f, (dist(engine) * 2.0f) - 1.0f), delta_time);
+	//windSpeed = clamp( lerp( windSpeed, windSpeed + ( dist(engine) * 2.0f ) - 1.0f * dist(engine), delta_time ), -0.3f, 0.3f );
+	//smokePS.SetWind(vec4(windDirection, windSpeed));
 
 	skyBox.SetPosition(currentCam->get_position());
 	player->update(delta_time);
@@ -289,6 +331,7 @@ bool update(float delta_time) {
 
 bool render() {
 	smokePS.SyncData();
+	firefliesPS.SyncData();
 
 	gBuffer.StartFrame();
 
@@ -300,9 +343,27 @@ bool render() {
 	for (int i = 0; i < pointLights.size(); ++i)
 	{
 		// Point lights get a stencil test 
-		DSStencilPass(i);
-		DSPointLightPass(i);
+		DSStencilPass(&pointLights[i]);
+		DSPointLightPass(&pointLights[i]);
 	}
+
+	GLuint FireflyPosBuffer = firefliesPS.GetPositionBuffer();
+	int particleCount = firefliesPS.GetParticleCount();
+	// Bind buffer to read/write data
+	// glBindBuffer(GL_SHADER_STORAGE_BUFFER, FireflyPosBuffer);
+	// Map the buffer to position array
+	// vec4 *positions = reinterpret_cast<vec4*>(glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, sizeof(vec4) * particleCount, GL_MAP_READ_BIT));
+
+	for (int i = 0; i < particleCount; ++i)
+	{
+		//printf("Particles pos [%f,%f,%f]\n\r", positions[i].x, positions[i].y, positions[i].z);
+		//DSStencilPass(firefliesPS.GetLight());
+		//DSPointLightPass(firefliesPS.GetLight());
+	}
+	// Unmap buffer
+	// glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
+	// Unbind buffer
+	// glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
 	glDisable(GL_STENCIL_TEST);
 	
@@ -339,11 +400,10 @@ void DSGeometryPass()
 	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-	// Render the skybox before anything else
-	skyBox.Render(VP);
-
 	// Make sure to enable depth test
 	glEnable(GL_DEPTH_TEST);
+
+	m_Terrain.Render(VP);
 
 	// Bind effect
 	renderer::bind(deferredShading);
@@ -393,24 +453,26 @@ void DSGeometryPass()
 
 	smokePS.Render(&camController);
 
+	// firefliesPS.Render(camController.GetCurrentViewMatrix(), camController.GetCurrentProjectionMatrix());
+
 	glDepthMask(GL_FALSE);
 }
 
-float CalcPointLightSphere(point_light light)
+float CalcPointLightSphere(point_light* light)
 {
-	vec4 colour = light.get_light_colour();
+	vec4 colour = light->get_light_colour();
 	float MaxChannel = fmax(fmax(colour.x, colour.y), colour.z);
 
-	float linear_attenuation = light.get_linear_attenuation();
-	float quad_attenuation = light.get_quadratic_attenuation();
+	float linear_attenuation = light->get_linear_attenuation();
+	float quad_attenuation = light->get_quadratic_attenuation();
 	
 	float ret = (-linear_attenuation + sqrtf(linear_attenuation * linear_attenuation -
-		4 * quad_attenuation * (quad_attenuation - 256 * MaxChannel * light.get_constant_attenuation())))
+		4 * quad_attenuation * (quad_attenuation - 256 * MaxChannel * light->get_constant_attenuation())))
 		/ (2 * quad_attenuation);
-	return ret / 3.0f;
+	return ret;
 }
 
-void DSStencilPass(int lightIndex)
+void DSStencilPass(point_light* light)
 {
 	auto VP = camController.GetCurrentVPMatrix();
 
@@ -429,20 +491,19 @@ void DSStencilPass(int lightIndex)
 	glStencilOpSeparate(GL_FRONT, GL_KEEP, GL_DECR_WRAP, GL_KEEP);
 
 	renderer::bind(stencilPass);
-
-	pLight.get_transform().position = pointLights[lightIndex].get_position();
-	pLight.get_transform().scale = vec3(CalcPointLightSphere(pointLights[lightIndex]));
+	pLight.get_transform().position = light->get_position();
+	pLight.get_transform().scale = vec3(CalcPointLightSphere(light));
 
 	auto M = pLight.get_transform().get_transform_matrix();
 	auto MVP = VP * M;
 
-	renderer::bind(pointLights[lightIndex], "gPointLight");
-
+	renderer::bind(*light, "gPointLight");
+	
 	glUniformMatrix4fv(stencilPass.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(MVP));
 	renderer::render(pLight);
 }
 
-void DSPointLightPass(int lightIndex)
+void DSPointLightPass(point_light* light)
 {
 	gBuffer.BindForLightPass();
 
@@ -460,21 +521,25 @@ void DSPointLightPass(int lightIndex)
 	camera* cam = camController.GetActiveCamera();
 	auto VP = camController.GetCurrentVPMatrix();
 
-	pLight.get_transform().position = pointLights[lightIndex].get_position();
-	pLight.get_transform().scale = vec3(CalcPointLightSphere(pointLights[lightIndex]));
+	float sphereSize = CalcPointLightSphere(light);
+
+	pLight.get_transform().position = light->get_position();
+	pLight.get_transform().scale = vec3(sphereSize);
 
 	auto M = pLight.get_transform().get_transform_matrix();
 	auto MVP = VP * M;
 
-	renderer::bind(pointLights[lightIndex], "gPointLight");
+	renderer::bind(*light, "gPointLight");
 	glUniform3fv(pointLightPass.get_uniform_location("gEyeWorldPos"), 1, value_ptr(cam->get_position()));
 	glUniform2fv(pointLightPass.get_uniform_location("gScreenSize"), 1, value_ptr(screenSize));
+	glUniform1f(pointLightPass.get_uniform_location("sphereSize"), sphereSize);
 
 	glUniform1i(pointLightPass.get_uniform_location("tPosition"), 0);
 	glUniform1i(pointLightPass.get_uniform_location("tAlbedo"), 1);
 	glUniform1i(pointLightPass.get_uniform_location("tNormals"), 2);
 	glUniform1i(pointLightPass.get_uniform_location("tMatDiffuse"), 3);
 	glUniform1i(pointLightPass.get_uniform_location("tMatSpecular"), 4);
+	glUniform1i(pointLightPass.get_uniform_location("tMatEmissive"), 5);
 
 	glUniformMatrix4fv(pointLightPass.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(MVP));
 	renderer::render(pLight);
@@ -504,6 +569,7 @@ void DSDirectionalLightPass()
 	glUniform1i(dirLightPass.get_uniform_location("tNormals"), 2);
 	glUniform1i(dirLightPass.get_uniform_location("tMatDiffuse"), 3);
 	glUniform1i(dirLightPass.get_uniform_location("tMatSpecular"), 4);
+	glUniform1i(dirLightPass.get_uniform_location("tMatEmissive"), 5);
 
 	glUniformMatrix4fv(dirLightPass.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(mat4(1.0f)));
 	renderer::render(screen_quad);
@@ -518,15 +584,19 @@ void RenderFrameOnScreen()
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, outlineBuffer);
 	glDrawBuffer(GL_COLOR_ATTACHMENT0);
 
+	skyBox.Render(camController.GetCurrentVPMatrix());
+
 	renderer::bind(deferredRendering);
+
+	glActiveTexture(GL_TEXTURE3);
+	glEnable(GL_TEXTURE_2D);
+	glBindTexture(GL_TEXTURE_2D, gBuffer.GetDepthTexture());
+	glUniform1i(deferredRendering.get_uniform_location("tDepth"), 3);
 
 	glActiveTexture(GL_TEXTURE1);
 	glEnable(GL_TEXTURE_2D);
 	glBindTexture(GL_TEXTURE_2D, gBuffer.GetFinalTexture());
 	glUniform1i(deferredRendering.get_uniform_location("tAlbedo"), 1);
-
-	renderer::bind(textures["CS_DATA"], 6);
-	glUniform1i(deferredRendering.get_uniform_location("tCellShading"), 6);
 
 	glUniformMatrix4fv(deferredRendering.get_uniform_location("MVP"), 1, GL_FALSE, value_ptr(mat4(1.0f)));
 
@@ -536,6 +606,7 @@ void RenderFrameOnScreen()
 void RenderOutline()
 {
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+
 	renderer::bind(outline);
 
 	// MVP is now the identity matrix
@@ -569,6 +640,8 @@ void RenderOutline()
 	glUniform1i(outline.get_uniform_location("depth_only"), depthOnly);
 	// Render the screen quad
 	renderer::render(screen_quad);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 void SetupLights()
@@ -576,17 +649,17 @@ void SetupLights()
 	pLight = mesh(geometry_builder::create_sphere());
 
 	// Directional light
-	ambientLight.set_ambient_intensity(vec4(0.2f));
+	ambientLight.set_ambient_intensity(vec4(0.05f));
 	ambientLight.set_light_colour(vec4(1.0f, 1.0f, 1.0f, 1.0f));
 	ambientLight.set_direction(normalize(vec3(1.0f, 1.0f, -1.0f)));
-
+	
 	// Point lights
 	pointLights[0].set_position(vec3(-15.0f, 4.0f, -15.0f));
-	pointLights[0].set_light_colour(vec4(0.2f, 0.6f, 0.3f, 1.0f));
+	pointLights[0].set_light_colour(vec4(2.0f, 6.0f, 3.3f, 1.0f));
 	pointLights[0].set_range(3.0f);
 
 	pointLights[1].set_position(vec3(-15.0f, 4.0f, 10.0f));
-	pointLights[1].set_light_colour(vec4(0.3f, 0.0f, 0.2f, 1.0f));
+	pointLights[1].set_light_colour(vec4(2.3f, 1.0f, 4.2f, 1.0f));
 	pointLights[1].set_range(dist(engine) * 5.0f + 2.0f);
 
 	pointLights[2].set_position(vec3(5.0f, 10.0f, -7.0f));
@@ -596,16 +669,11 @@ void SetupLights()
 	pointLights[3].set_position(vec3(2.0f, 4.0f, 20.0f));
 	pointLights[3].set_light_colour(vec4(0.0f, 0.21f, 0.19f, 1.0f));
 	pointLights[3].set_range(5.0f + dist(engine) * 4.0f);
+	
 }
 
 void SetupGeometry()
-{// Ground
-	mesh floorMesh = mesh(geometry_builder::create_plane());
-	floorMesh.get_material().set_emissive(vec4(0.0f, 0.0f, 0.0f, 1.0f));
-	floorMesh.get_material().set_diffuse(vec4(1.0f, 1.0f, 0.0f, 1.0f));
-	floorMesh.get_material().set_specular(vec4(.0f, .0f, .0f, 1.0f));
-	floorMesh.get_material().set_shininess(150.0f);
-
+{
 	mesh boxMesh = mesh(geometry_builder::create_box());
 	boxMesh.get_material().set_emissive(vec4(0.0f, 0.0f, 0.0f, 1.0f));
 	boxMesh.get_material().set_specular(vec4(1.0f, 1.0f, 1.0f, 1.0f));
@@ -618,27 +686,48 @@ void SetupGeometry()
 	cylinderMesh.get_material().set_shininess(10.0f);
 	cylinderMesh.get_material().set_diffuse(vec4(0.0f, 0.0f, 1.0f, 1.0f));
 
-	mesh sphereMesh = mesh(geometry_builder::create_sphere());
-	sphereMesh.get_material().set_emissive(vec4(0.0f, 0.0f, 0.0f, 1.0f));
-	sphereMesh.get_material().set_specular(vec4(0.0f, 1.0f, 1.0f, 1.0f));
-	sphereMesh.get_material().set_shininess(10.0f);
-	sphereMesh.get_material().set_diffuse(vec4(0.2f, 0.2f, 0.7f, 1.0f));
+	uniform_real_distribution<float> treeDist(-terrainSize.x, terrainSize.x);
+
+	string rocks[] = { "rock_small", "rock_medium", "rock_flat", "rock_big" };
+	for(string s : rocks)
+	{
+		mesh rockMesh = mesh(geometry("res/models/" + s + ".obj"));
+		rockMesh.get_material().set_shininess(100.0f);
+		rockMesh.get_material().set_specular(vec4(100.0f, 92.0f, 94.0f, 255.0f) / vec4(255.0f));
+		rockMesh.get_material().set_diffuse(vec4(1.0f));
+		for (int i = 0; i < 150; ++i)
+		{
+			string rockName = s + to_string(i);
+
+			vec3 randomPos = vec3(treeDist(engine), 0, treeDist(engine)) * terrainSize.x / 2.0f;
+
+			gameObjects[rockName] = new RenderedObject(rockMesh, &textures["stone"]);
+			gameObjects[rockName]->get_mesh()->get_transform().position = randomPos;
+			gameObjects[rockName]->get_mesh()->get_transform().scale = vec3((dist(engine) + 1.2f) + 0.55f);
+			float rot = treeDist(engine) * 60.0f;
+			gameObjects[rockName]->get_mesh()->get_transform().rotate(vec3(0.0f, rot, 0.0f));
+		}
+	}
 
 	mesh treeMesh = mesh(geometry("res/models/tree.obj"));
 	treeMesh.get_material().set_shininess(100.0f);
 	treeMesh.get_material().set_specular(vec4(54.0f, 92.0f, 61.0f, 255.0f) / vec4(255.0f));
 	treeMesh.get_material().set_diffuse(vec4(1.0f));
 
-	treeMesh.get_transform().scale = vec3(2.5f);
-
 	// Create game objects
-	// Ground object
-	gameObjects["floor"] = new RenderedObject(floorMesh, &textures["dirt"]); // , &normals["dirt"]);
-	gameObjects["floor"]->get_mesh()->get_transform().position = vec3(0.0f, 0.0f, 0.0f);
+	// Generate some trees
+	for (int i = 0; i < 600; ++i)
+	{
+		string treeName = "tree" + to_string(i);
+		vec3 randomPos = vec3(treeDist(engine), 0, treeDist(engine)) * terrainSize.x / 2.0f;
 
-	gameObjects["tree"] = new RenderedObject(treeMesh, &textures["tree"]);
-	gameObjects["tree"]->get_mesh()->get_transform().position = vec3(40.0f, 0.0f, -12.0f);
-
+		gameObjects[treeName] = new RenderedObject(treeMesh, &textures["tree"]);
+		gameObjects[treeName]->get_mesh()->get_transform().position = randomPos; // vec3(40.0f, 0.0f, -12.0f);
+		gameObjects[treeName]->get_mesh()->get_transform().scale = vec3((dist(engine)+1.2f) + 0.55f);
+		float rot = treeDist(engine) * 60.0f;
+		gameObjects[treeName]->get_mesh()->get_transform().rotate(vec3(0.0f, rot, 0.0f));
+		
+	}
 	// Player object
 	player = new Player(boxMesh, &textures["metal"], &normals["metal"]);
 
@@ -664,19 +753,9 @@ void SetupGeometry()
 	gameObjects["barrel"]->set_parent(gameObjects["turret"]);
 	gameObjects["barrel"]->set_local_scale(vec3(1.0f, 3.0f, 1.0f));
 
-	// Some other objects
-	gameObjects["wall"] = new RenderedObject(boxMesh, &textures["brick"], &normals["brick"]);
-	gameObjects["wall"]->get_mesh()->get_transform().position = vec3(1.0f, 1.0f, 0.0f);
-	gameObjects["wall"]->set_local_scale(vec3(3.0f, 3.0f, 1.0f));
-
-	gameObjects["wall2"] = new RenderedObject(boxMesh, &textures["brick"], &normals["brick"]);
-	gameObjects["wall2"]->get_mesh()->get_transform().position = vec3(4.0f, 1.0f, 0.0f);
-	gameObjects["wall2"]->set_local_scale(vec3(3.0f, 3.0f, 1.0f));
-
-	gameObjects["wall3"] = new RenderedObject(boxMesh, &textures["brick"], &normals["brick"]);
-	gameObjects["wall3"]->get_mesh()->get_transform().position = vec3(7.0f, 1.0f, 0.0f);
-	gameObjects["wall3"]->set_local_scale(vec3(3.0f, 3.0f, 1.0f));
-
-	gameObjects["sphere"] = new RenderedObject(sphereMesh, &textures["metal"], &normals["metal"]);
-	gameObjects["sphere"]->get_mesh()->get_transform().position = vec3(-10.0f, 2.0f, 0.0f);
+	mesh sphereMesh = mesh(geometry_builder::create_sphere());
+	sphereMesh.get_material().set_emissive(vec4(1.0f, 0.0f, 0.0f, 1.0f));
+	sphereMesh.get_material().set_specular(vec4(0.0f, 1.0f, 0.0f, 1.0f));
+	sphereMesh.get_material().set_shininess(2.0f);
+	sphereMesh.get_material().set_diffuse(vec4(0.0f, 0.0f, 1.0f, 1.0f));
 }

@@ -9,6 +9,7 @@ struct directional_light
 uniform sampler2D tPosition;
 uniform sampler2D tAlbedo; 
 uniform sampler2D tNormals;
+uniform sampler2D tMatEmissive;
 uniform sampler2D tMatDiffuse;
 uniform sampler2D tMatSpecular;
 
@@ -34,44 +35,36 @@ void main()
    	vec4 Normal = texture(tNormals, TexCoord);
 	vec4 Diffuse = texture(tMatDiffuse, TexCoord);
 	vec4 Specular = texture(tMatSpecular, TexCoord);
+	vec4 Emissive = texture(tMatEmissive, TexCoord);
 	vec3 normal = normalize(Normal.rgb);
+	
+	const float A = 0.1;
+    const float B = 0.3;
+    const float C = 0.6;
+    const float D = 1.0;
 
 	float k;
-  vec4 ambient = Diffuse * gDirectionalLight.ambient_intensity;
-  // Calculate diffuse component
-  k = max( dot( normal, gDirectionalLight.light_dir ), 0 );
-  vec4 diffuse = k * Diffuse * gDirectionalLight.light_colour;
-  // Calculate view direction
-  vec3 view_dir = normalize( gEyeWorldPos - WorldPos );
-  // Calculate half vector
-  vec3 half_vector = normalize( view_dir + gDirectionalLight.light_dir );
-  // Calculate specular component
-  k = pow( max( dot( normal, half_vector ), 0 ), Normal.a );
-  vec4 specular = k * (Specular * gDirectionalLight.light_colour );
-  // Calculate primary colour component
-  vec4 primary = ambient + diffuse;
-  // Calculate final colour - remember alpha
-  primary.a = 1;
-  specular.a = 1;
-  colour = Color * primary + specular;
-  /*
+	vec4 ambient = Diffuse * gDirectionalLight.ambient_intensity;
+	// Calculate diffuse component
+	k = max( dot( normal, gDirectionalLight.light_dir ), 0 );
+    if (k < A) k = 0.0;
+    else if (k < B) k = B;
+    else if (k < C) k = C;
+    else k = D;
 
+	vec4 diffuse = k * Diffuse * gDirectionalLight.light_colour;
 	// Calculate view direction
 	vec3 view_dir = normalize( gEyeWorldPos - WorldPos );
-	// Calculate ambient component
-	vec4 ambient = vec4(Diffuse.rgb,1.0) * gDirectionalLight.ambient_intensity;
-	// Calculate diffuse component 
-	// Calculate normalized half vector 
+	// Calculate half vector
 	vec3 half_vector = normalize( view_dir + gDirectionalLight.light_dir );
-	
-	float intensity = max(dot(Normal, gDirectionalLight.light_dir), 0);
-	float specIntensity = max(dot(Normal, half_vector), 0);
-	
-	vec4 diffuse = ( vec4(Diffuse.rgb,1.0) * gDirectionalLight.light_colour) * intensity;
 	// Calculate specular component
-	vec4 specular = ( Specular * gDirectionalLight.light_colour ) * pow( specIntensity, Diffuse.a );
-	// Calculate colour to return
-	colour = ((ambient + diffuse) * Color) + specular;
-	colour.a = 1.0;
-	*/
+	k = pow( max( dot( normal, half_vector ), 0 ), Normal.a );
+	k = step(0.5, k);
+	vec4 specular = k * (Specular * gDirectionalLight.light_colour );
+	// Calculate primary colour component
+	vec4 primary = Emissive + ambient + diffuse;
+	// Calculate final colour - remember alpha
+	primary.a = 1;
+	specular.a = 1;
+	colour = Color * primary + specular;
 }

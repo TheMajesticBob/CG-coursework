@@ -35,8 +35,8 @@ public:
 
 private:
 	int activeCamera;
-	double mouseSensitivity = 80.0f;
-	float cameraMovementSpeed = 15.0f;
+	double mouseSensitivity = 180.0f;
+	float cameraMovementSpeed = 25.0f;
 
 	vector<camera*> cameras;
 	map<string, camera*> _cameras;

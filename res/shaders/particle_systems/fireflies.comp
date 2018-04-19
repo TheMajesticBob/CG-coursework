@@ -1,0 +1,70 @@
+#version 440 core
+
+// Process particles in blocks of 128
+layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
+// SSBO binding
+layout(std430, binding = 0) buffer PositionBuffer { vec4 positions[]; };
+layout(std430, binding = 1) buffer VelocityBuffer { vec4 velocities[]; };
+layout(std430, binding = 2) buffer TargetBuffer { vec4 targets[]; };
+
+uniform bool isEmitting;
+
+// Time variables for calculations
+uniform float delta_time;
+
+// Particle vars
+uniform vec2 speed;
+uniform vec3 bounds;
+
+highp float rand(vec2 co)
+{
+    highp float a = 12.9898;
+    highp float b = 78.233;
+    highp float c = 43758.5453;
+    highp float dt= dot(co.xy ,vec2(a,b));
+    highp float sn= mod(dt,3.14);
+    return fract(sin(sn) * c);
+}
+
+void main() 
+{
+	uint index = gl_GlobalInvocationID.x;
+
+	// Read the current position and velocity from the buffers
+	vec4 vel = velocities[index];
+	vec4 pos = positions[index];
+	vec3 target = targets[index].xyz;
+
+	// Read the real values
+	vec3 realVelocity = vel.xyz;
+	vec3 realPosition = pos.xyz;
+	float mySpeed = pos.w;
+	float lastDirChange = vel.w;
+	
+	lastDirChange += delta_time;
+
+	if( lastDirChange > 5.0 )
+	{
+		target = vec3( rand( vec2(vel) ), rand( vec2(pos) ), rand( vec2(target) ) );
+		lastDirChange = 0.0;
+	}
+
+	target = normalize(target);
+	vec3 newPos = realPosition + target * delta_time;
+	
+	if( abs(newPos).x >= bounds.x )
+		target.x *= -1;
+	if( abs(newPos).y >= bounds.y )
+		target.y *= -1;
+	if( abs(newPos).z >= bounds.z )
+		target.z *= -1;
+	
+	realVelocity = normalize( mix( realVelocity, target, delta_time ) );
+	mySpeed = mix( mySpeed, rand( vel.xz + pos.xy ) * ( speed.y - speed.x ) + speed.x, delta_time );
+	
+	pos = pos + vec4( realVelocity * delta_time * mySpeed, 1.0 );
+	
+	velocities[index] = vec4( realVelocity, lastDirChange );
+	positions[index] = vec4( 0.0, 20.0, 0.0, 0.0 ); // vec4( pos.xyz, mySpeed );
+	targets[index] = vec4( target, 0.0 );
+}

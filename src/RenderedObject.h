@@ -37,7 +37,7 @@ public:
 
 protected:
 	mesh my_mesh;
-	texture *my_tex, *my_normal;
+	texture *my_tex, *my_normal = nullptr;
 	effect *my_eff;
 	RenderedObject *parent = nullptr;
 

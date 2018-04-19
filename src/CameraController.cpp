@@ -21,7 +21,7 @@ void CameraController::Initialize()
 	freeCam->set_target(vec3(0.0f, 0.0f, 0.0f));
 	
 	// Set active camera number to 0
-	SetCamera(0);
+	SetCamera(1);
 
 	// Bind camera switching functions to proper keys
 	InputHandler::BindKey('1', GLFW_PRESS, KeyDelegate::from_function<CameraController, &CameraController::PreviousCamera>(this));
