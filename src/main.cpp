@@ -75,7 +75,7 @@ float CalcPointLightSphere(point_light* light);
 
 int depthOnly = 0;
 // Random stuff
-const int MAX_FIREFLIES = 10;
+const unsigned int MAX_FIREFLIES = 120;
 
 // Deferred render vars
 GBuffer gBuffer;
@@ -94,6 +94,10 @@ bool initialise() {
 	glfwSetKeyCallback(renderer::get_window(), InputHandler::KeyboardHandler);
 	glfwSetMouseButtonCallback(renderer::get_window(), InputHandler::MouseButtonHandler);
 	glfwSetCursorPosCallback(renderer::get_window(), InputHandler::MousePosHandler);
+
+	// During init, enable debug output
+	// glEnable(GL_DEBUG_OUTPUT);
+	// glDebugMessageCallback((GLDEBUGPROC)MessageCallback, 0);
 
 	camController.Initialize();
 	return true;
@@ -124,6 +128,7 @@ bool load_content() {
 	textures["grass"] = texture("res/textures/grass.png");
 	textures["stone"] = texture("res/textures/stone.jpg");
 	textures["stonygrass"] = texture("res/textures/stonygrass.jpg");
+	textures["firefly"] = texture("res/textures/firefly.png");
 
 	// Load up normal textures
 	normals["empty"] = texture("res/textures/normals/empty_normal.png");
@@ -199,20 +204,20 @@ bool load_content() {
 
 	// Set up smoke particles
 	smokePS = ParticleSystem(32);
-	smokePS.Init(vec3(8.0f, 16.0f, 6.0f));
+	smokePS.Init(vec3(8.0f, 24.0f, 6.0f));
 	smokePS.SetParticleColour(vec4(1.0f, 0.3f, 0.0f, 1.0f), vec4(0.9f));
 	smokePS.SetSpawnRate(0.05f, 0.15f);
 	smokePS.SetParticleLifetime(1.0f, 5.0f);
 	smokePS.SetInitialParticleSize(0.2f, 1.0f);
 	smokePS.SetParticleSpeed(1.0f, 4.0f);
 	smokePS.SetParticleDirection(vec3(0.0f, 1.0f, 0.0f));
-	smokePS.SetPosition(vec3(0.0f, 8.0f, 0.0f));
+	smokePS.SetPosition(vec3(-20.3f, 8.3f, -24.0f));
 
 	smokePS.SetEmitting(true);
 
-	// Set up fireflies
-	firefliesPS = Firefly(vec3(32.0f, 20.0f, 32.0f), texture("res/textures/firefly.png"));
-	firefliesPS.Init(10);
+	firefliesPS = Firefly(vec3(32.0f, 8.0f, 32.0f), &textures["firefly"]);
+	firefliesPS.SetBounds(vec3(0.0f, 4.0f, 0.0f), vec3(24.0f, 6.0f, 24.0f));
+	firefliesPS.Init(MAX_FIREFLIES);
 
 	windSpeed = 0.02f;
 	windDirection = vec3(1.0f, 0.0f, 0.0f);
@@ -251,7 +256,6 @@ bool load_content() {
 		return false;
 	}
 
-	// Reset buffer
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	return true;
 }
@@ -260,10 +264,9 @@ bool load_content() {
 bool update(float delta_time) {
 	// Update input
 	InputHandler::Update(delta_time);
-
+	firefliesPS.update(delta_time);
 	// Update smoke particles
 	smokePS.UpdateDelta(delta_time);
-	firefliesPS.update(delta_time);
 
 	camera* currentCam = camController.GetActiveCamera();
 
@@ -330,7 +333,10 @@ bool update(float delta_time) {
 }
 
 bool render() {
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+
 	smokePS.SyncData();
+
 	firefliesPS.SyncData();
 
 	gBuffer.StartFrame();
@@ -350,20 +356,20 @@ bool render() {
 	GLuint FireflyPosBuffer = firefliesPS.GetPositionBuffer();
 	int particleCount = firefliesPS.GetParticleCount();
 	// Bind buffer to read/write data
-	// glBindBuffer(GL_SHADER_STORAGE_BUFFER, FireflyPosBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, FireflyPosBuffer);
 	// Map the buffer to position array
-	// vec4 *positions = reinterpret_cast<vec4*>(glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, sizeof(vec4) * particleCount, GL_MAP_READ_BIT));
+	vec4 *positions = reinterpret_cast<vec4*>(glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, sizeof(vec4) * particleCount, GL_MAP_READ_BIT));
 
 	for (int i = 0; i < particleCount; ++i)
 	{
-		//printf("Particles pos [%f,%f,%f]\n\r", positions[i].x, positions[i].y, positions[i].z);
-		//DSStencilPass(firefliesPS.GetLight());
-		//DSPointLightPass(firefliesPS.GetLight());
+		point_light* light = firefliesPS.GetLight(positions[i]);
+		DSStencilPass(light);
+		DSPointLightPass(light);
 	}
 	// Unmap buffer
-	// glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
+	glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
 	// Unbind buffer
-	// glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
 	glDisable(GL_STENCIL_TEST);
 	
@@ -412,6 +418,7 @@ void DSGeometryPass()
 	for (auto &e : gameObjects)
 	{
 		auto m = e.second;
+
 		// Create MVP matrix
 		mat4 M = m->get_transform_matrix();
 		mat4 MVP = VP * M;
@@ -453,7 +460,7 @@ void DSGeometryPass()
 
 	smokePS.Render(&camController);
 
-	// firefliesPS.Render(camController.GetCurrentViewMatrix(), camController.GetCurrentProjectionMatrix());
+	firefliesPS.Render(camController.GetCurrentViewMatrix(), camController.GetCurrentProjectionMatrix(), gBuffer.GetDepthTexture() );
 
 	glDepthMask(GL_FALSE);
 }
@@ -522,14 +529,13 @@ void DSPointLightPass(point_light* light)
 	auto VP = camController.GetCurrentVPMatrix();
 
 	float sphereSize = CalcPointLightSphere(light);
-
 	pLight.get_transform().position = light->get_position();
 	pLight.get_transform().scale = vec3(sphereSize);
 
 	auto M = pLight.get_transform().get_transform_matrix();
 	auto MVP = VP * M;
 
-	renderer::bind(*light, "gPointLight");
+	renderer::bind(point_light(*light), "gPointLight");
 	glUniform3fv(pointLightPass.get_uniform_location("gEyeWorldPos"), 1, value_ptr(cam->get_position()));
 	glUniform2fv(pointLightPass.get_uniform_location("gScreenSize"), 1, value_ptr(screenSize));
 	glUniform1f(pointLightPass.get_uniform_location("sphereSize"), sphereSize);
@@ -622,7 +628,7 @@ void RenderOutline()
 	glBindTexture(GL_TEXTURE_2D, gBuffer.GetDepthTexture());
 
 	// Set the tex uniform
-	glUniform1i(outline.get_uniform_location("tPosition"), 0);
+	glUniform1i(outline.get_uniform_location("tPosition"), 5);
 	glUniform1i(outline.get_uniform_location("tAlbedo"), 1);
 	glUniform1i(outline.get_uniform_location("tNormals"), 2);
 	glUniform1i(outline.get_uniform_location("tDepth"), 3);
@@ -664,7 +670,7 @@ void SetupLights()
 
 	pointLights[2].set_position(vec3(5.0f, 10.0f, -7.0f));
 	pointLights[2].set_light_colour(vec4(0.24f, 0.20f, 0.31f, 1.0f));
-	pointLights[2].set_range(4.0f + dist(engine) * 3.0f);
+	pointLights[2].set_range(4.0f + dist(engine) * 3.00f);
 
 	pointLights[3].set_position(vec3(2.0f, 4.0f, 20.0f));
 	pointLights[3].set_light_colour(vec4(0.0f, 0.21f, 0.19f, 1.0f));
@@ -688,7 +694,7 @@ void SetupGeometry()
 
 	uniform_real_distribution<float> treeDist(-terrainSize.x, terrainSize.x);
 
-	string rocks[] = { "rock_small", "rock_medium", "rock_flat", "rock_big" };
+	string rocks[] = { "rock_small", "rock_medium", "rock_flat" };
 	for(string s : rocks)
 	{
 		mesh rockMesh = mesh(geometry("res/models/" + s + ".obj"));
@@ -705,7 +711,7 @@ void SetupGeometry()
 			gameObjects[rockName]->get_mesh()->get_transform().position = randomPos;
 			gameObjects[rockName]->get_mesh()->get_transform().scale = vec3((dist(engine) + 1.2f) + 0.55f);
 			float rot = treeDist(engine) * 60.0f;
-			gameObjects[rockName]->get_mesh()->get_transform().rotate(vec3(0.0f, rot, 0.0f));
+			gameObjects[rockName]->get_mesh()->get_transform().orientation *= quat(vec3(0.0f, rot, 0.0f));
 		}
 	}
 
@@ -716,7 +722,7 @@ void SetupGeometry()
 
 	// Create game objects
 	// Generate some trees
-	for (int i = 0; i < 600; ++i)
+	for (int i = 0; i < 400; ++i)
 	{
 		string treeName = "tree" + to_string(i);
 		vec3 randomPos = vec3(treeDist(engine), 0, treeDist(engine)) * terrainSize.x / 2.0f;
@@ -732,7 +738,7 @@ void SetupGeometry()
 	player = new Player(boxMesh, &textures["metal"], &normals["metal"]);
 
 	gameObjects["player"] = player;
-	gameObjects["player"]->get_mesh()->get_transform().position = vec3(-15.0f, 1.0f, -15.0f);
+	gameObjects["player"]->get_mesh()->get_transform().position = vec3(-20.0f, 1.3f, -25.0f);
 	gameObjects["player"]->get_mesh()->get_transform().scale = vec3(5.0f, 2.0f, 10.0f);
 
 	gameObjects["turretBase"] = new RenderedObject(boxMesh, &textures["metal"], &normals["metal"]);

@@ -31,6 +31,8 @@ ParticleSystem::ParticleSystem(int maxParticles)
 
 ParticleSystem::~ParticleSystem()
 {
+	glDeleteBuffers(1, &G_Position_buffer);
+	glDeleteBuffers(1, &G_Velocity_buffer);
 }
 
 void ParticleSystem::Init(vec3 cubeSize)
@@ -77,7 +79,6 @@ void ParticleSystem::UpdateDelta(float deltaTime)
 					glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, sizeof(vec4) * maxParticles, GL_MAP_READ_BIT | GL_MAP_WRITE_BIT)
 				);
 				
-				// printf("Particle 0: [%f,%f,%f,%f]\n", positions[0].x, positions[0].y, positions[0].z, positions[0].w);
 				// Assign a new particle
 				positions[currentParticles] = pos;
 				// Unmap buffer
@@ -88,6 +89,7 @@ void ParticleSystem::UpdateDelta(float deltaTime)
 				vec4 *velocities = reinterpret_cast<vec4*>(
 					glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, sizeof(vec4) * maxParticles, GL_MAP_READ_BIT | GL_MAP_WRITE_BIT)
 					);
+
 				velocities[currentParticles] = vel;
 				glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
 
@@ -144,6 +146,7 @@ void ParticleSystem::SyncData()
 		return;
 	}
 
+	glBindVertexArray(vao);
 	// Bind Compute Shader
 	renderer::bind(computeShader);
 	// Bind data as SSBO

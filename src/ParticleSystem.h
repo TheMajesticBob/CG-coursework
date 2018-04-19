@@ -4,7 +4,7 @@
 #include "MarchingCubes.h"
 #include "graphics_framework.h"
 
-const float RESOLUTION = 4.0f;
+const float RESOLUTION = 2.0f;
 const unsigned int MAX_PARTICLES = 48;
 
 using namespace graphics_framework;

@@ -21,6 +21,6 @@ void main()
 	diffuse_out	 = colour;
 	position_out = position;
 	normal_out	 = vec4(normal,1.0);
-	mat_diffuse_out	 = vec4(0.7,0.7,0.7, 0.95);
-	mat_specular_out = vec4(0.0, 0.0, 0.0, 1.0);
+	mat_diffuse_out	 = vec4(0.9,0.9,0.9, 0.95);
+	mat_specular_out = vec4(0.1, 0.1, 0.1, 1.0);
 }

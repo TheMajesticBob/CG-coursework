@@ -6,8 +6,7 @@ layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
 layout(std430, binding = 0) buffer PositionBuffer { vec4 positions[]; };
 layout(std430, binding = 1) buffer VelocityBuffer { vec4 velocities[]; };
 layout(std430, binding = 2) buffer TargetBuffer { vec4 targets[]; };
-
-uniform bool isEmitting;
+layout(std430, binding = 3) buffer ColourBuffer { vec4 colours[]; };
 
 // Time variables for calculations
 uniform float delta_time;
@@ -15,6 +14,7 @@ uniform float delta_time;
 // Particle vars
 uniform vec2 speed;
 uniform vec3 bounds;
+uniform vec3 boundsPos;
 
 highp float rand(vec2 co)
 {
@@ -45,26 +45,35 @@ void main()
 
 	if( lastDirChange > 5.0 )
 	{
-		target = vec3( rand( vec2(vel) ), rand( vec2(pos) ), rand( vec2(target) ) );
+		target = vec3( rand( vec2(vel) ), rand( vec2(pos) ) / 4.0, rand( vec2(target) ) );
 		lastDirChange = 0.0;
 	}
 
 	target = normalize(target);
-	vec3 newPos = realPosition + target * delta_time;
+	vec3 newPos = (realPosition + target * 2.0f-boundsPos);
 	
 	if( abs(newPos).x >= bounds.x )
+	{
+		realVelocity.x *= -1;
 		target.x *= -1;
+	}
 	if( abs(newPos).y >= bounds.y )
+	{
+		realVelocity.y *= -1;
 		target.y *= -1;
+	}
 	if( abs(newPos).z >= bounds.z )
+	{
+		realVelocity.z *= -1;
 		target.z *= -1;
+	}
 	
-	realVelocity = normalize( mix( realVelocity, target, delta_time ) );
-	mySpeed = mix( mySpeed, rand( vel.xz + pos.xy ) * ( speed.y - speed.x ) + speed.x, delta_time );
+	realVelocity = normalize( mix( realVelocity, target, 0.01 ) );
+	mySpeed = mix( mySpeed, rand( vel.xz + pos.xy + delta_time * 1041235.2 ) * ( speed.y - speed.x ) + speed.x, delta_time );
 	
-	pos = pos + vec4( realVelocity * delta_time * mySpeed, 1.0 );
+	pos = pos + vec4( realVelocity * delta_time * mySpeed, 0.0 );
 	
 	velocities[index] = vec4( realVelocity, lastDirChange );
-	positions[index] = vec4( 0.0, 20.0, 0.0, 0.0 ); // vec4( pos.xyz, mySpeed );
+	positions[index] = vec4( pos.xyz, mySpeed );
 	targets[index] = vec4( target, 0.0 );
 }

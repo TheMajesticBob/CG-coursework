@@ -10,6 +10,10 @@ GBuffer::GBuffer()
 
 GBuffer::~GBuffer()
 {
+	glDeleteBuffers(1, &m_fbo);
+	glDeleteBuffers(ARRAY_SIZE_IN_ELEMENTS(m_textures), m_textures);
+	glDeleteBuffers(1, &m_depthTexture);
+	glDeleteBuffers(1, &m_finalTexture);
 }
 
 bool GBuffer::Init(unsigned int screenWidth, unsigned int screenHeight)

@@ -49,9 +49,10 @@ float cubeVal( in int i, out vec3 nor, out vec4 col )
 
 		vec3 n = 2.0 * (cubePos(i)-positions[j].xyz);
 		nor += n * positions[j].w * positions[j].w / ( dist * dist * dist * dist );
-		col += clamp( value, -1.0, 0.0 ) * -mix( startColour, endColour, positions[j].y / 1.0f ); //);
+		col += clamp( value, -1.0, 0.0 ) * -mix( startColour, endColour, positions[j].y / 1.0f );
 	}
 
+	col /= value;
 	nor = normalize(nor);
 	return value;
 }

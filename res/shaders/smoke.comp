@@ -103,11 +103,12 @@ void main()
 	}
 
 	// Store the new position and velocity back into the buffers
-	// velocities[index] = vec4( realVelocity, remainingLifetime ); //
 
 	vec3 windDir = windDirection.xyz;
 	float windStrength = windDirection.w;
 
 	velocities[index] = vec4( mix( realVelocity, realVelocity + windDir * windStrength, delta_time ), remainingLifetime);
+	
+	velocities[index] = vec4( realVelocity, remainingLifetime ); //
 	positions[index] = vec4( realPosition, metaballSize );
 }

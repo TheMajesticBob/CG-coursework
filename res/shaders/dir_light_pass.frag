@@ -27,6 +27,12 @@ vec2 CalcTexCoord()
    return gl_FragCoord.xy / gScreenSize;
 }
 
+float stepmix(float edge0, float edge1, float E, float x)
+{
+    float T = clamp(0.5 * (x - edge0 + E) / E, 0.0, 1.0);
+    return mix(edge0, edge1, T);
+}
+
 void main()
 {
 	vec2 TexCoord = CalcTexCoord();
@@ -42,12 +48,18 @@ void main()
     const float B = 0.3;
     const float C = 0.6;
     const float D = 1.0;
+	float E;
 
 	float k;
 	vec4 ambient = Diffuse * gDirectionalLight.ambient_intensity;
 	// Calculate diffuse component
 	k = max( dot( normal, gDirectionalLight.light_dir ), 0 );
-    if (k < A) k = 0.0;
+	E = fwidth(k);
+	// Cell shade
+	if (k > A - E && k < A + E) k = stepmix(A, B, E, k);
+    else if (k > B - E && k < B + E) k = stepmix(B, C, E, k);
+    else if (k > C - E && k < C + E) k = stepmix(C, D, E, k);
+    else if (k < A) k = 0.0;
     else if (k < B) k = B;
     else if (k < C) k = C;
     else k = D;
@@ -59,7 +71,15 @@ void main()
 	vec3 half_vector = normalize( view_dir + gDirectionalLight.light_dir );
 	// Calculate specular component
 	k = pow( max( dot( normal, half_vector ), 0 ), Normal.a );
-	k = step(0.5, k);
+	E = fwidth(k);
+	if( k > 0.5 - E && k < 0.5 + E )
+	{
+		k += smoothstep(0.5 - E, 0.5 + E, k);
+	} else 
+	{
+		k = step(0.5, k);
+	}
+
 	vec4 specular = k * (Specular * gDirectionalLight.light_colour );
 	// Calculate primary colour component
 	vec4 primary = Emissive + ambient + diffuse;

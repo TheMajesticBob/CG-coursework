@@ -1,4 +1,4 @@
-#version 440 core
+#version 440
 
 uniform mat4 MV;
 
