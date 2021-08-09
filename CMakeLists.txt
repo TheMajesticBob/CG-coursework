@@ -17,7 +17,7 @@ SET (CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/lib")
 ### Add External Dependencies ####
 
 
-add_subdirectory("../framework" "framework_build/")
+add_subdirectory("lib/framework" "framework_build/")
 
 #Glew and Devil are dumb and don't listen to our build directories, so manually set it.
 set(IL_RUNTIME_DIR ${CMAKE_RUNTIME_OUTPUT_DIRECTORY} CACHE PATH "Output location for Devil .dlls/.so" FORCE)
